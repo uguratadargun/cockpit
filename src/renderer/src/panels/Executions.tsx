@@ -1,10 +1,10 @@
 import { BaseEdge, Background, EdgeLabelRenderer, getBezierPath, getSmoothStepPath, Handle, MarkerType, Panel, Position, ReactFlow, type Edge, type EdgeProps, type Node, type NodeProps } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
 import clsx from "clsx";
-import { Pause, Play, Square, Workflow } from "lucide-react";
+import { ArrowRightLeft, ChevronDown, ChevronRight, FileMinus, FilePen, FilePlus, GitCompare, Pause, Play, RefreshCw, Square, Workflow } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 
-import type { Execution, WorkflowEvent } from "@shared/types";
+import type { ChangedFile, Execution, WorkflowEvent } from "@shared/types";
 
 import { Pill } from "@/components/Badge";
 import { Button } from "@/components/Button";
@@ -135,6 +135,8 @@ function ExecutionDetail({ id }: { id: string | null }) {
         {stopError && <span className="text-[11px] text-rose-400">{stopError}</span>}
       </header>
 
+      <ChangedFiles executionId={execution.id} />
+
       <div className="relative min-h-0 flex-1">
         {graph ? (
           <Graph key={execution.id} graphId={execution.workflowId} events={list} />
@@ -145,6 +147,170 @@ function ExecutionDetail({ id }: { id: string | null }) {
 
       <EventLog events={list} />
     </div>
+  );
+}
+
+// ----------------------------------------------------------------- changes
+
+const STATUS_ICON: Record<ChangedFile["status"], typeof FilePlus> = {
+  added: FilePlus,
+  modified: FilePen,
+  deleted: FileMinus,
+  renamed: ArrowRightLeft,
+};
+const STATUS_COLOR: Record<ChangedFile["status"], string> = {
+  added: "text-emerald-400",
+  modified: "text-amber-400",
+  deleted: "text-rose-400",
+  renamed: "text-violet-400",
+};
+
+/**
+ * What `git status`/`git diff` say about the run's working directory, styled
+ * like GitLab's changed-files list: a row per file with its +/- counts, each
+ * expandable to the file's own diff. This is not gate's data — the run's
+ * session may have moved on (or the repo may have been cleaned up) since.
+ */
+function ChangedFiles({ executionId }: { executionId: string }) {
+  const [files, setFiles] = useState<ChangedFile[] | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [open, setOpen] = useState(false);
+  const [loading, setLoading] = useState(false);
+
+  const load = () => {
+    setLoading(true);
+    setError(null);
+    window.cockpit.executions.changedFiles(executionId).then((r) => {
+      setLoading(false);
+      if (r.ok) setFiles(r.value);
+      else setError(r.error);
+    });
+  };
+
+  useEffect(() => {
+    setFiles(null);
+    setError(null);
+    setLoading(true);
+    let cancelled = false;
+    window.cockpit.executions.changedFiles(executionId).then((r) => {
+      if (cancelled) return;
+      setLoading(false);
+      if (r.ok) setFiles(r.value);
+      else setError(r.error);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [executionId]);
+
+  const totals = useMemo(() => {
+    if (!files) return null;
+    return files.reduce((acc, f) => ({ add: acc.add + f.additions, del: acc.del + f.deletions }), { add: 0, del: 0 });
+  }, [files]);
+
+  const Icon = open ? ChevronDown : ChevronRight;
+  return (
+    <div className="shrink-0 border-b border-zinc-800 px-4 py-1.5">
+      <div className="flex items-center gap-1.5">
+        <button
+          type="button"
+          onClick={() => setOpen((o) => !o)}
+          className="flex items-center gap-1 text-[11px] uppercase tracking-wide text-zinc-400 hover:text-zinc-200"
+          aria-expanded={open}
+        >
+          <Icon size={12} />
+          <GitCompare size={12} />
+          Changed files
+        </button>
+        {files && <span className="text-[11px] text-zinc-500">{files.length === 0 ? "none" : `${files.length} file${files.length === 1 ? "" : "s"}`}</span>}
+        {totals && (totals.add > 0 || totals.del > 0) && (
+          <span className="font-mono text-[10px]">
+            <span className="text-emerald-400">+{totals.add}</span> <span className="text-rose-400">-{totals.del}</span>
+          </span>
+        )}
+        <button type="button" onClick={load} disabled={loading} title="Refresh" className="ml-auto text-zinc-500 hover:text-zinc-300 disabled:opacity-50">
+          <RefreshCw size={11} className={loading ? "animate-spin" : ""} />
+        </button>
+      </div>
+      {open && (
+        <div className="mt-1.5 max-h-60 overflow-y-auto rounded border border-zinc-800">
+          {error && <div className="px-2 py-1.5 text-[11px] text-rose-400">{error}</div>}
+          {!error && !files && <div className="px-2 py-1.5 text-[11px] text-zinc-500">Loading…</div>}
+          {files && files.length === 0 && <div className="px-2 py-1.5 text-[11px] text-zinc-500">No changes in this run's working directory.</div>}
+          {files?.map((f) => <ChangedFileRow key={`${f.oldPath ?? ""}->${f.path}`} executionId={executionId} file={f} />)}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function ChangedFileRow({ executionId, file }: { executionId: string; file: ChangedFile }) {
+  const [open, setOpen] = useState(false);
+  const [diff, setDiff] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const StatusIcon = STATUS_ICON[file.status];
+  const Chevron = open ? ChevronDown : ChevronRight;
+
+  const toggle = () => {
+    const next = !open;
+    setOpen(next);
+    if (next && diff === null && !error && !file.binary) {
+      window.cockpit.executions.fileDiff(executionId, file).then((r) => {
+        if (r.ok) setDiff(r.value);
+        else setError(r.error);
+      });
+    }
+  };
+
+  return (
+    <div className="border-b border-zinc-800/70 last:border-b-0">
+      <button type="button" onClick={toggle} className="flex w-full items-center gap-1.5 px-2 py-1 text-left hover:bg-zinc-800/40" aria-expanded={open}>
+        <Chevron size={11} className="shrink-0 text-zinc-500" />
+        <StatusIcon size={12} className={clsx("shrink-0", STATUS_COLOR[file.status])} />
+        <span className="truncate font-mono text-[11px] text-zinc-200" title={file.oldPath ? `${file.oldPath} → ${file.path}` : file.path}>
+          {file.oldPath ? (
+            <>
+              <span className="text-zinc-500 line-through">{file.oldPath}</span> → {file.path}
+            </>
+          ) : (
+            file.path
+          )}
+        </span>
+        {file.binary ? (
+          <span className="ml-auto shrink-0 text-[10px] text-zinc-500">binary</span>
+        ) : (
+          <span className="ml-auto shrink-0 font-mono text-[10px]">
+            {file.additions > 0 && <span className="text-emerald-400">+{file.additions}</span>} {file.deletions > 0 && <span className="text-rose-400">-{file.deletions}</span>}
+          </span>
+        )}
+      </button>
+      {open && !file.binary && (
+        <div className="border-t border-zinc-800/70">
+          {error && <div className="px-2 py-1.5 text-[11px] text-rose-400">{error}</div>}
+          {!error && diff === null && <div className="px-2 py-1.5 text-[11px] text-zinc-500">Loading…</div>}
+          {diff !== null && <DiffView diff={diff} />}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** A unified diff's hunks, each line coloured by its `+`/`-`/context leader — GitLab's inline diff, without the split view. */
+function DiffView({ diff }: { diff: string }) {
+  const lines = diff.split("\n").filter((_, i, arr) => i < arr.length - 1 || arr[i] !== "");
+  const body = lines.filter((l) => !l.startsWith("diff --git") && !l.startsWith("index ") && !l.startsWith("--- ") && !l.startsWith("+++ "));
+  if (body.length === 0) return <div className="px-2 py-1.5 text-[11px] text-zinc-500">No textual changes.</div>;
+  return (
+    <pre className="max-h-72 overflow-auto bg-zinc-950 py-1 font-mono text-[11px] leading-relaxed">
+      {body.map((line, i) => {
+        const tone = line.startsWith("@@") ? "text-sky-400" : line.startsWith("+") ? "text-emerald-300 bg-emerald-500/10" : line.startsWith("-") ? "text-rose-300 bg-rose-500/10" : "text-zinc-400";
+        return (
+          <div key={i} className={clsx("whitespace-pre px-2", tone)}>
+            {line || " "}
+          </div>
+        );
+      })}
+    </pre>
   );
 }
 

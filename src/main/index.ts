@@ -6,6 +6,7 @@ import { join } from "node:path";
 import { invoke, push } from "../shared/ipc";
 import type {
   AskAnswer,
+  ChangedFile,
   ClaudeSession,
   Execution,
   Pending,
@@ -17,6 +18,7 @@ import type {
   WorkflowEvent,
 } from "../shared/types";
 import { cockpitSockPath } from "../shared/sockPath";
+import { changedFilesFor, fileDiffFor } from "./changedFiles";
 import { GateClient, parseConnectInput, readConnection, writeConnection } from "./gate";
 import { listWorkflows, loadWorkflowGraph } from "./graph";
 import { HookServer, type SessionHookEvent } from "./hooks";
@@ -481,6 +483,14 @@ function readCurrentNode(executionId: string): RunPointer | null {
   return null;
 }
 
+/** The directory the run's session is sitting in — gate has no notion of this, only the session's own transcript does. */
+function cwdForExecution(executionId: string): string | null {
+  const execution = executions.find((e) => e.id === executionId);
+  const sessionId = execution?.client?.session;
+  if (!sessionId) return null;
+  return discoverSessions({ limit: 200 }).find((s) => s.id === sessionId)?.cwd ?? null;
+}
+
 // --------------------------------------------------------------------- ipc
 
 function registerIpc(): void {
@@ -539,6 +549,16 @@ function registerIpc(): void {
   });
   ipcMain.handle(invoke.executionsGraph, (_e, workflowId: string) => loadWorkflowGraph(workflowId, teamId));
   ipcMain.handle(invoke.executionsWorkflows, () => listWorkflows(teamId));
+  ipcMain.handle(invoke.executionsChangedFiles, async (_e, id: string): Promise<Result<ChangedFile[]>> => {
+    const cwd = cwdForExecution(id);
+    if (!cwd) return { ok: false, error: "no working directory known for this run" };
+    return changedFilesFor(cwd);
+  });
+  ipcMain.handle(invoke.executionsFileDiff, async (_e, id: string, file: ChangedFile): Promise<Result<string>> => {
+    const cwd = cwdForExecution(id);
+    if (!cwd) return { ok: false, error: "no working directory known for this run" };
+    return fileDiffFor(cwd, file);
+  });
 
   ipcMain.handle(invoke.gateUsage, async (): Promise<Result<unknown>> => {
     if (!gate) return { ok: false, error: "not connected to a gate" };

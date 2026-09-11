@@ -32,6 +32,8 @@ export const invoke = {
   executionsCancel: "executions:cancel",
   executionsGraph: "executions:graph",
   executionsWorkflows: "executions:workflows",
+  executionsChangedFiles: "executions:changed-files",
+  executionsFileDiff: "executions:file-diff",
   // gate
   gateUsage: "gate:usage",
   // window

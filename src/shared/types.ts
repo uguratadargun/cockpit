@@ -108,6 +108,19 @@ export type Pending = PendingAsk | PendingPermission;
 
 // -------------------------------------------------------------- executions
 
+/** One file a run's session touched, read from `git status`/`git diff` in its cwd — not gate's own data. */
+export interface ChangedFile {
+  path: string;
+  /** Set only for a rename/copy, its path before. */
+  oldPath?: string;
+  status: "added" | "modified" | "deleted" | "renamed";
+  additions: number;
+  deletions: number;
+  binary: boolean;
+  /** Never in the index at all (git status `??`), vs. added-and-staged. Picks which diff command can see it. */
+  untracked: boolean;
+}
+
 /** A run as gate's client API returns it; only the fields the cockpit reads are named. */
 export interface Execution {
   id: string;

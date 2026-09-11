@@ -3,6 +3,7 @@ import { contextBridge, ipcRenderer, type IpcRendererEvent } from "electron";
 import { invoke, push } from "../shared/ipc";
 import type {
   AskAnswer,
+  ChangedFile,
   ClaudeSession,
   Execution,
   GateUsage,
@@ -73,6 +74,9 @@ const api = {
     graph: (workflowId: string): Promise<Result<WorkflowGraph>> => ipcRenderer.invoke(invoke.executionsGraph, workflowId),
     /** The team's workflows, from the mirror on this machine. */
     workflows: (): Promise<Result<WorkflowSummary[]>> => ipcRenderer.invoke(invoke.executionsWorkflows),
+    /** What `git status`/`git diff` say in the run's session's cwd — not gate's own data. */
+    changedFiles: (executionId: string): Promise<Result<ChangedFile[]>> => ipcRenderer.invoke(invoke.executionsChangedFiles, executionId),
+    fileDiff: (executionId: string, file: ChangedFile): Promise<Result<string>> => ipcRenderer.invoke(invoke.executionsFileDiff, executionId, file),
     onEvent: (cb: (frame: StreamFrame) => void): Unsubscribe => on(push.executionEvent, cb),
   },
   gate: {
