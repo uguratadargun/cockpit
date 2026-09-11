@@ -169,11 +169,15 @@ function writeLastCwd(cwd: string): void {
   }
 }
 
-/** Live first, then asleep; newest activity first inside each. */
+/**
+ * Live first, then asleep. Live ties break on startedAt (stable — doesn't move once a
+ * session opens) rather than lastActiveAt, which ticks on every output chunk and would
+ * otherwise make two concurrently-active sessions swap places on nearly every update.
+ */
 export function sortSessions(sessions: ClaudeSession[]): ClaudeSession[] {
   return [...sessions].sort((a, b) => {
     if (a.presence !== b.presence) return a.presence === "live" ? -1 : 1;
-    return b.lastActiveAt - a.lastActiveAt;
+    return a.presence === "live" ? b.startedAt - a.startedAt : b.lastActiveAt - a.lastActiveAt;
   });
 }
 

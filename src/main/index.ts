@@ -211,7 +211,13 @@ function sessionList(): ClaudeSession[] {
       run: sid ? readRunPointer(sid) : null,
     });
   }
-  out.sort((a, b) => Number(b.presence === "live") - Number(a.presence === "live") || b.lastActiveAt - a.lastActiveAt);
+  // Live sessions break ties by startedAt, not lastActiveAt: the latter moves on every
+  // output chunk, so two sessions both producing output would otherwise swap places
+  // every debounce tick as they leapfrogged each other's most-recent timestamp.
+  out.sort((a, b) => {
+    if (a.presence !== b.presence) return a.presence === "live" ? -1 : 1;
+    return a.presence === "live" ? b.startedAt - a.startedAt : b.lastActiveAt - a.lastActiveAt;
+  });
   return out;
 }
 

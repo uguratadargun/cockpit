@@ -135,6 +135,9 @@ export function acquireTerminal(ptyId: string): TerminalEntry {
     // in the renderer that grows with session length: at a wide terminal
     // 10000 lines is ~10 MB per pty, which is a deep history at a sane cost.
     scrollback: 10000,
+    // xterm's default is 1 line per wheel "tick" — noticeably heavier than a native
+    // terminal's mouse-wheel feel; this brings it closer to iTerm/Terminal.app.
+    scrollSensitivity: 3,
     // When a program paints a coloured cell background while leaving the
     // default foreground, xterm adjusts the foreground per cell to keep at
     // least this contrast (WCAG AA) against the actual background.

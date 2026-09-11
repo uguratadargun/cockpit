@@ -23,7 +23,9 @@ export function SessionsList({ className }: { className?: string }) {
   const selectedProject = useStore((s) => s.selectedProject);
   const selectProject = useStore((s) => s.selectProject);
   const setSection = useStore((s) => s.setSection);
+  const startSession = useStore((s) => s.startSession);
   const [creating, setCreating] = useState(false);
+  const [starting, setStarting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   // The column shows one project's sessions when one is chosen; every session otherwise.
@@ -36,12 +38,33 @@ export function SessionsList({ className }: { className?: string }) {
     if (result && !result.ok) setError(result.error);
   };
 
+  // A project is already chosen above: open claude straight there, no form in the way.
+  // Only "all projects" needs the form, to say which directory a session belongs to.
+  const newSession = async () => {
+    if (!selectedProject) {
+      setCreating((c) => !c);
+      return;
+    }
+    setError(null);
+    setStarting(true);
+    const result = await startSession(selectedProject);
+    setStarting(false);
+    if (!result.ok) setError(result.error);
+  };
+
   return (
     <aside className={clsx("flex w-72 shrink-0 flex-col border-r border-zinc-800 bg-[var(--surface-1)]", className)}>
       <div className="flex items-center gap-2 border-b border-zinc-800 px-3 py-2">
         <span className="text-xs font-semibold uppercase tracking-wide text-zinc-400">Sessions</span>
-        <Button size="sm" variant="primary" className="ml-auto" onClick={() => setCreating((c) => !c)} title={selectedProject ? `New session in ${selectedProject}` : "New session"}>
-          <Plus size={12} /> New
+        <Button
+          size="sm"
+          variant="primary"
+          className="ml-auto"
+          disabled={starting}
+          onClick={() => void newSession()}
+          title={selectedProject ? `New session in ${selectedProject}` : "New session"}
+        >
+          <Plus size={12} /> {starting ? "Starting…" : "New"}
         </Button>
       </div>
       {/* Which project this column is narrowed to, and the way out of it. */}
