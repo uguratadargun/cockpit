@@ -52,7 +52,8 @@
         { "target": "AppImage", "arch": ["x64"] },
         { "target": "deb", "arch": ["x64"] }
       ],
-      "category": "Development"
+      "category": "Development",
+      "maintainer": "Ugur Ata Dargun <ugur.dargun@ordulu.com>"
     }
   },
   "dependencies": {

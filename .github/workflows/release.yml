@@ -17,7 +17,7 @@ jobs:
         include:
           - os: macos-latest
             build-args: --mac
-          - os: windows-latest
+          - os: windows-2022
             build-args: --win
           - os: ubuntu-latest
             build-args: --linux
