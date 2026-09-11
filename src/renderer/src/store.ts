@@ -67,6 +67,12 @@ interface CockpitState {
   selectedProject: string | null;
   /** Projects added by hand, kept across launches; a directory with no sessions yet. */
   pinnedProjects: string[];
+  /**
+   * Projects taken off the list, with when. A project found through its
+   * sessions cannot be deleted — the sessions are on disk — so it is hidden
+   * instead, until a session newer than the hiding runs there again.
+   */
+  hiddenProjects: Record<string, number>;
 
   /** Timestamp of the last new pending item per section; the nav badge pulses briefly after it. */
   arrivals: Record<Section, number>;
@@ -80,7 +86,8 @@ interface CockpitState {
 
   selectProject: (path: string | null) => void;
   pinProject: (path: string) => void;
-  unpinProject: (path: string) => void;
+  /** Takes a project off the list: unpins it, and hides it until something new happens there. */
+  removeProject: (path: string) => void;
 
   setSection: (section: Section) => void;
   selectSession: (session: ClaudeSession) => Promise<Result<{ ptyId: string }> | null>;
@@ -100,6 +107,7 @@ interface CockpitState {
 const LAST_CWD_KEY = "cockpit.lastCwd";
 const PROJECT_KEY = "cockpit.selectedProject";
 const PINNED_KEY = "cockpit.pinnedProjects";
+const HIDDEN_KEY = "cockpit.hiddenProjects";
 
 function readJson<T>(key: string, fallback: T): T {
   try {
@@ -186,6 +194,7 @@ export const useStore = create<CockpitState>((set, get) => ({
   lastCwd: readLastCwd(),
   selectedProject: readJson<string | null>(PROJECT_KEY, null),
   pinnedProjects: readJson<string[]>(PINNED_KEY, []),
+  hiddenProjects: readJson<Record<string, number>>(HIDDEN_KEY, {}),
   arrivals: { projects: 0, sessions: 0, questions: 0, approvals: 0, executions: 0 },
 
   init: async () => {
@@ -282,15 +291,20 @@ export const useStore = create<CockpitState>((set, get) => ({
 
   pinProject: (path) => {
     const pinned = [...new Set([...get().pinnedProjects, path])];
+    const { [path]: _shown, ...hidden } = get().hiddenProjects;
     writeJson(PINNED_KEY, pinned);
-    set({ pinnedProjects: pinned });
+    writeJson(HIDDEN_KEY, hidden);
+    set({ pinnedProjects: pinned, hiddenProjects: hidden });
   },
 
-  unpinProject: (path) => {
+  removeProject: (path) => {
     const pinned = get().pinnedProjects.filter((p) => p !== path);
+    const hidden = { ...get().hiddenProjects, [path]: Date.now() };
     writeJson(PINNED_KEY, pinned);
-    set({ pinnedProjects: pinned, ...(get().selectedProject === path ? { selectedProject: null } : {}) });
-    if (get().selectedProject === null) writeJson(PROJECT_KEY, null);
+    writeJson(HIDDEN_KEY, hidden);
+    const deselect = get().selectedProject === path;
+    if (deselect) writeJson(PROJECT_KEY, null);
+    set({ pinnedProjects: pinned, hiddenProjects: hidden, ...(deselect ? { selectedProject: null } : {}) });
   },
 
   connectGate: async (token) => {
@@ -411,7 +425,12 @@ export function useProjects(): Project[] {
         p.lastActiveAt = Math.max(p.lastActiveAt, x.lastActiveAt);
         byPath.set(x.cwd, p);
       }
-      return [...byPath.values()].sort((a, b) => b.attention - a.attention || b.live - a.live || b.lastActiveAt - a.lastActiveAt);
+      // A hidden project comes back when a session newer than the hiding runs there, or when it is live now.
+      const visible = [...byPath.values()].filter((p) => {
+        const hiddenAt = s.hiddenProjects[p.path];
+        return hiddenAt === undefined || p.live > 0 || p.lastActiveAt > hiddenAt;
+      });
+      return visible.sort((a, b) => b.attention - a.attention || b.live - a.live || b.lastActiveAt - a.lastActiveAt);
     }),
   );
 }

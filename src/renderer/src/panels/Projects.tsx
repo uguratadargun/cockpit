@@ -1,5 +1,5 @@
 import clsx from "clsx";
-import { FolderOpen, Pin, PinOff, Plus } from "lucide-react";
+import { FolderOpen, Pin, Plus, X } from "lucide-react";
 import { useState } from "react";
 
 import { Badge, Pill } from "@/components/Badge";
@@ -20,7 +20,7 @@ export function Projects() {
   const selectedProject = useStore((s) => s.selectedProject);
   const selectProject = useStore((s) => s.selectProject);
   const pinProject = useStore((s) => s.pinProject);
-  const unpinProject = useStore((s) => s.unpinProject);
+  const removeProject = useStore((s) => s.removeProject);
   const startSession = useStore((s) => s.startSession);
   const [adding, setAdding] = useState(false);
   const [path, setPath] = useState("");
@@ -125,19 +125,7 @@ export function Projects() {
               >
                 <Plus size={12} /> Session
               </Button>
-              {p.pinned ? (
-                <button
-                  type="button"
-                  title="Remove from the list (no session will be touched)"
-                  className="shrink-0 rounded p-1 text-zinc-600 hover:bg-zinc-700 hover:text-zinc-200"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    unpinProject(p.path);
-                  }}
-                >
-                  <PinOff size={12} />
-                </button>
-              ) : (
+              {!p.pinned && (
                 <button
                   type="button"
                   title="Keep in the list even when its sessions are gone"
@@ -150,6 +138,18 @@ export function Projects() {
                   <Pin size={12} />
                 </button>
               )}
+              {/* Every project can be taken off the list; the sessions on disk are untouched, and a new one there brings it back. */}
+              <button
+                type="button"
+                title={p.pinned ? "Remove from the list" : "Remove from the list (its sessions stay; a new session there brings it back)"}
+                className="shrink-0 rounded p-1 text-zinc-600 hover:bg-zinc-700 hover:text-rose-300"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  removeProject(p.path);
+                }}
+              >
+                <X size={12} />
+              </button>
             </li>
           );
         })}
