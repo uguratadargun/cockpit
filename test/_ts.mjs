@@ -15,13 +15,42 @@
  * still being written) resolves to the stub named here, so the modules that
  * import it stay testable. A stub is used only while the real file is absent.
  */
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync, rmSync, statSync } from "node:fs";
+import os from "node:os";
 import { register } from "node:module";
 import { dirname, resolve as resolvePath } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { isMainThread } from "node:worker_threads";
 
 const ROOT = resolvePath(dirname(fileURLToPath(import.meta.url)), "..");
+
+// Every test makes its own `cockpit-*` directory under the OS temp dir and
+// not all of them remove it; measured here, thousands of them helped fill a
+// disk. When this process ends, the ones it created are swept — by birth
+// time, so a run happening alongside keeps its own.
+if (isMainThread) {
+  const startedAt = Date.now() - 1_000;
+  process.on("exit", () => {
+    const root = os.tmpdir();
+    let entries = [];
+    try {
+      entries = readdirSync(root);
+    } catch {
+      return;
+    }
+    for (const name of entries) {
+      if (!name.startsWith("cockpit-")) continue;
+      const path = resolvePath(root, name);
+      try {
+        const st = statSync(path);
+        if (!st.isDirectory() || (st.birthtimeMs || st.ctimeMs) < startedAt) continue;
+        rmSync(path, { recursive: true, force: true });
+      } catch {
+        // gone already
+      }
+    }
+  });
+}
 
 const STUBS = {
   "src/main/transcript.ts":

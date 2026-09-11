@@ -256,9 +256,19 @@ export const useStore = create<CockpitState>((set, get) => ({
           // The stream's snapshot carries only running runs and a poll carries
           // recent ones: either way it is merged, so a finished run stays on
           // the list until a fresh list says otherwise.
-          const byId = new Map(get().executions.map((e) => [e.id, e]));
+          const before = get().executions;
+          const byId = new Map(before.map((e) => [e.id, e]));
           for (const e of frame.executions) byId.set(e.id, e);
           set({ executions: sortExecutions([...byId.values()]) });
+          // Without a stream (a gate before 0.34.0) the snapshot is a poll,
+          // and the graph on screen would otherwise stand still: when the run
+          // being looked at has moved, its events are fetched again.
+          const id = get().selectedExecutionId;
+          const now = id ? frame.executions.find((e) => e.id === id) : undefined;
+          const was = id ? before.find((e) => e.id === id) : undefined;
+          if (now && (!was || was.stepCount !== now.stepCount || was.pausedAt !== now.pausedAt || was.status !== now.status)) {
+            void get().loadEvents(now.id);
+          }
           return;
         }
         const { executions, events } = get();
