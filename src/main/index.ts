@@ -75,7 +75,7 @@ function statusFor(sessionId: string | null, live: { alive: boolean; hasOutput: 
  * exactly where it was. `COCKPIT_HIBERNATE_MIN` overrides the default; 0
  * turns it off.
  */
-const HIBERNATE_MS = Math.max(0, Number(process.env.COCKPIT_HIBERNATE_MIN ?? 30)) * 60_000;
+const HIBERNATE_MS = Math.max(0, Number(process.env.COCKPIT_HIBERNATE_MIN ?? 10)) * 60_000;
 /** When each terminal was last seen doing anything: output, a keystroke, a hook. */
 const lastAliveAt = new Map<string, number>();
 
