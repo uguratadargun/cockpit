@@ -89,7 +89,9 @@ describe("connection file", () => {
       writeConnection({ url: "http://new/", key: "gate_new" }, { team: "ulak" });
       const raw = JSON.parse(readFileSync(file, "utf8"));
       assert.deepEqual(raw, { url: "http://new", key: "gate_new", team: "ulak", trusted: { dev: "abc" } });
-      assert.equal(statSync(file).mode & 0o777, 0o600);
+      if (process.platform !== "win32") {
+        assert.equal(statSync(file).mode & 0o777, 0o600);
+      }
       assert.equal(gate.readConnectedTeam(), "ulak");
     });
   });
