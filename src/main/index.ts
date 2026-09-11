@@ -95,9 +95,13 @@ function createWindow(): BrowserWindow {
   });
   if (process.env.ELECTRON_RENDERER_URL) void w.loadURL(process.env.ELECTRON_RENDERER_URL);
   else void w.loadFile(join(__dirname, "../renderer/index.html"));
+  // Taken now: by the time `closed` fires the window is destroyed and
+  // `w.webContents` throws ("Object has been destroyed"). The reference
+  // itself stays comparable, which is all killByOwner needs.
+  const contents = w.webContents;
   w.on("closed", () => {
     // Terminals belong to the window that showed them.
-    ptys.killByOwner(w.webContents);
+    ptys.killByOwner(contents);
     win = null;
   });
   return w;
