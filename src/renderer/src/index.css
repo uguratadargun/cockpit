@@ -38,6 +38,25 @@
   --color-zinc-900: #f4f4f5;
   --color-zinc-950: #fafafa;
   --color-black: #ffffff;
+  /* Pale accent text (sky-300, amber-300 …) is written for dark surfaces; on white it is the
+     darker end of the same hue. Tinted backgrounds (/15) and 500-level borders read fine as they are. */
+  --color-sky-100: #0c4a6e;
+  --color-sky-200: #075985;
+  --color-sky-300: #0369a1;
+  --color-amber-100: #78350f;
+  --color-amber-200: #92400e;
+  --color-amber-300: #b45309;
+  --color-rose-100: #881337;
+  --color-rose-200: #9f1239;
+  --color-rose-300: #be123c;
+  --color-rose-400: #e11d48;
+  --color-emerald-200: #065f46;
+  --color-emerald-300: #047857;
+  --color-emerald-400: #059669;
+  --color-rose-950: #ffe4e6;
+  --color-rose-900: #fecdd3;
+  --color-amber-900: #fde68a;
+  --color-emerald-700: #6ee7b7;
 }
 
 html, body, #root { height: 100%; margin: 0; }
