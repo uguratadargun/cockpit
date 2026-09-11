@@ -90,8 +90,11 @@ test("ensureShim writes the shim once and leaves it alone when unchanged", async
 });
 
 test("hookCommand runs this binary as node with quoted paths", () => {
-  assert.equal(hookCommand("/a b/shim.cjs"), `ELECTRON_RUN_AS_NODE=1 "${process.execPath}" "/a b/shim.cjs"`);
-  assert.equal(hookCommand('/q"x', STATUS_ARG), `ELECTRON_RUN_AS_NODE=1 "${process.execPath}" "/q\\"x" "${STATUS_ARG}"`);
+  // hookCommand's quoting escapes \, ", $, ` for the POSIX shell hooks run through — on
+  // Windows process.execPath itself contains backslashes, so the expected value must too.
+  const execPath = process.execPath.replace(/[\\"$`]/g, (c) => `\\${c}`);
+  assert.equal(hookCommand("/a b/shim.cjs"), `ELECTRON_RUN_AS_NODE=1 "${execPath}" "/a b/shim.cjs"`);
+  assert.equal(hookCommand('/q"x', STATUS_ARG), `ELECTRON_RUN_AS_NODE=1 "${execPath}" "/q\\"x" "${STATUS_ARG}"`);
 });
 
 test("writeSessionSettings routes every event through the shim, with a day's timeout on the two blocking hooks", () => {

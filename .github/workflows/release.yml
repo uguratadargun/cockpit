@@ -48,7 +48,9 @@ jobs:
         run: npm run build
 
       - name: Package
-        run: npx electron-builder ${{ matrix.build-args }}
+        # electron-builder auto-publishes on a tag push in CI since package.json names a
+        # github publish target; this job only builds — the separate `publish` job uploads.
+        run: npx electron-builder ${{ matrix.build-args }} --publish never
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: false
 

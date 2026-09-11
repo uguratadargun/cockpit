@@ -42,12 +42,17 @@ describe("setup", () => {
   };
   const env = () => ({ PATH: `${bin}:/usr/bin:/bin`, CLAUDE_CONFIG_DIR: config, HOME: root });
 
-  test("findClaude: the first claude on the given PATH and its version", () => {
+  // fakeClaude is a `#!/bin/sh` script on a `:`-joined PATH — there's no POSIX shell or shebang
+  // exec on Windows to run it. resolveClaudePath's own win32 branch (claude.cmd/.exe) is untested
+  // here as a result; the PATH/exec-resolution logic itself is exercised on macOS and Linux CI.
+  const skip = process.platform === "win32" ? "fakeClaude is a POSIX shell script, not runnable on Windows" : false;
+
+  test("findClaude: the first claude on the given PATH and its version", { skip }, () => {
     const path = fakeClaude('[ "$1" = "--version" ] && echo "2.1.266 (Claude Code)"');
     assert.deepEqual(findClaude(env()), { path, version: "2.1.266" });
   });
 
-  test("findClaude: null when PATH has none, or when it fails to run", () => {
+  test("findClaude: null when PATH has none, or when it fails to run", { skip }, () => {
     assert.equal(findClaude({ PATH: "/nonexistent" }), null);
     fakeClaude("exit 1");
     assert.equal(findClaude(env()), null);
@@ -77,7 +82,7 @@ describe("setup", () => {
     assert.deepEqual(pluginStatus(env()), { installed: true, version: "0.9.0", latest: null, updateAvailable: false });
   });
 
-  test("installPlugin runs marketplace add then install --yes, non-interactively", async () => {
+  test("installPlugin runs marketplace add then install --yes, non-interactively", { skip }, async () => {
     const log = join(root, "calls.log");
     fakeClaude(`echo "$@" >> "${log}"; [ -t 0 ] && echo "stdin is a tty" >> "${log}"; exit 0`);
     const r = await installPlugin(env());
@@ -88,7 +93,7 @@ describe("setup", () => {
     ]);
   });
 
-  test("installPlugin skips marketplace add when the marketplace is already known", async () => {
+  test("installPlugin skips marketplace add when the marketplace is already known", { skip }, async () => {
     const log = join(root, "calls.log");
     writeFileSync(join(config, "plugins", "known_marketplaces.json"), JSON.stringify({ gateway: { source: { source: "git", url: "git@mirror:ai/ai.git" } } }));
     fakeClaude(`echo "$@" >> "${log}"; exit 0`);
@@ -96,7 +101,7 @@ describe("setup", () => {
     assert.deepEqual(readFileSync(log, "utf8").trim().split("\n"), [`plugin install ${PLUGIN_ID} --yes`]);
   });
 
-  test("installPlugin reports stderr on failure, and a missing claude", async () => {
+  test("installPlugin reports stderr on failure, and a missing claude", { skip }, async () => {
     fakeClaude('echo "some progress"; echo "fatal: could not read from remote repository" >&2; exit 128');
     const r = await installPlugin(env());
     assert.equal(r.ok, false);
@@ -107,7 +112,7 @@ describe("setup", () => {
     assert.match(none.error, /claude was not found/);
   });
 
-  test("setupStatus: not connected without a login; an unreachable gate keeps its url", async () => {
+  test("setupStatus: not connected without a login; an unreachable gate keeps its url", { skip }, async () => {
     fakeClaude('echo "2.1.266 (Claude Code)"');
     const s1 = await setupStatus(env());
     assert.deepEqual(s1, {
