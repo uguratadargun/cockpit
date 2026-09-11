@@ -11,6 +11,7 @@ import type {
   Pending,
   PermissionDecision,
   Result,
+  RunPointer,
   SessionStatus,
   StreamFrame,
   WorkflowEvent,
@@ -441,9 +442,22 @@ async function eventsFor(executionId: string): Promise<WorkflowEvent[]> {
       // What the stream saw after the last recorded step: the node that is
       // out now, and whether the person holds it.
       for (const e of liveEvents.get(executionId) ?? []) if (e.at > lastStepAt) out.push(e);
-      if (execution.status === "running" && execution.pausedAt && !out.some((e) => e.type === "run.paused" && e.at >= execution.pausedAt!)) {
+      if (execution.status === "running") {
         const current = readCurrentNode(executionId);
-        if (current) out.push({ type: "run.paused", executionId, at: execution.pausedAt, nodeId: current });
+        if (execution.pausedAt && !out.some((e) => e.type === "run.paused" && e.at >= execution.pausedAt!)) {
+          // The person holds a node; the run's clock is stopped on it.
+          if (current?.nodeId) out.push({ type: "run.paused", executionId, at: execution.pausedAt, nodeId: current.nodeId });
+        } else if (!execution.pausedAt && current?.nodeId && current.at >= lastStepAt && isWorking(current.state)) {
+          // What the stream would have shown, had it seen it: the node the
+          // session was told to work is still its turn. A bus wiped by a gate
+          // restart, or a stream that reconnected mid-run, has nothing to say
+          // about it; the session's own pointer does. Guarded to the run it
+          // was written for and to an instruction handed out no earlier than
+          // the last recorded step, so a stale file cannot relabel the run.
+          if (!out.some((e) => e.type === "node.started" && e.at >= current.at)) {
+            out.push({ type: "node.started", executionId, at: current.at, nodeId: current.nodeId, stepIndex: steps.length, visit: 1 });
+          }
+        }
       }
     } catch {
       // Offline: only what the stream had.
@@ -453,11 +467,16 @@ async function eventsFor(executionId: string): Promise<WorkflowEvent[]> {
   return out;
 }
 
-/** The node a session-driven run is on, from the session that drives it. */
-function readCurrentNode(executionId: string): string | null {
+/** A run state the session is still turning: its node has not yet returned. */
+function isWorking(state: RunPointer["state"]): boolean {
+  return state === "agent" || state === "wait" || state === "delegate";
+}
+
+/** What the session driving this run was last told, from its own pointer file. */
+function readCurrentNode(executionId: string): RunPointer | null {
   for (const s of discoverSessions({ limit: 60 })) {
     const p = readRunPointer(s.id);
-    if (p?.executionId === executionId) return p.nodeId;
+    if (p?.executionId === executionId) return p;
   }
   return null;
 }
