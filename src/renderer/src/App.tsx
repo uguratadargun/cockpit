@@ -100,6 +100,7 @@ function Shell() {
           )}
           <UsageLine />
           <PluginLine />
+          <UpdateLine />
           <ThemeSwitch />
         </div>
       </nav>
@@ -174,6 +175,42 @@ function PluginLine() {
         </span>
       )}
     </div>
+  );
+}
+
+/**
+ * A newer release than this app, once the main process's periodic check finds one.
+ *
+ * Windows and Linux's AppImage build download silently; the button only
+ * appears live ("restart to update") once electron-updater has it staged.
+ * macOS can't verify a silently-downloaded update (only ad-hoc signed, see
+ * afterSignAdhoc.cjs), so it always just opens the release page.
+ */
+function UpdateLine() {
+  const update = useStore((s) => s.update);
+  const installUpdate = useStore((s) => s.installUpdate);
+  const [busy, setBusy] = useState(false);
+  if (!update?.available) return null;
+
+  const ready = update.mode === "manual" || update.downloaded;
+  const go = async () => {
+    if (busy || !ready) return;
+    setBusy(true);
+    await installUpdate();
+    setBusy(false);
+  };
+
+  return (
+    <button
+      type="button"
+      onClick={() => void go()}
+      disabled={busy || !ready}
+      title={update.mode === "manual" ? `Version ${update.version} is out — opens the release page` : `Version ${update.version} is ready to install`}
+      className="flex items-center gap-1.5 rounded px-1 py-0.5 text-left text-amber-400 hover:bg-zinc-800 disabled:opacity-60"
+    >
+      <span className="truncate">update {update.version} available</span>
+      <span className="ml-auto shrink-0 underline">{update.mode === "manual" ? "release page" : ready ? "restart to update" : "downloading…"}</span>
+    </button>
   );
 }
 

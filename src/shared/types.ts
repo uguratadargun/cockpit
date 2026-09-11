@@ -215,6 +215,23 @@ export interface SetupStatus {
 
 export type Result<T = void> = { ok: true; value: T } | { ok: false; error: string };
 
+// ------------------------------------------------------------------- update
+
+/**
+ * "auto": electron-updater can download and install silently — Windows, and
+ * Linux's AppImage. `downloaded` means it is staged; installing runs
+ * quitAndInstall. "manual": mac's ad-hoc signing can't pass Squirrel.Mac's
+ * update signature check, so this only compares against the GitHub release
+ * feed and installing just opens the release page.
+ */
+export interface UpdateStatus {
+  available: boolean;
+  version: string | null;
+  downloaded: boolean;
+  error: string | null;
+  mode: "auto" | "manual";
+}
+
 // ---------------------------------------------------------------- terminal
 
 export interface PtyInfo {

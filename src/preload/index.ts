@@ -13,6 +13,7 @@ import type {
   Result,
   SetupStatus,
   StreamFrame,
+  UpdateStatus,
   WorkflowEvent,
   WorkflowGraph,
   WorkflowSummary,
@@ -85,6 +86,11 @@ const api = {
   },
   window: {
     focus: (): Promise<void> => ipcRenderer.invoke(invoke.windowFocus),
+  },
+  update: {
+    onStatus: (cb: (status: UpdateStatus) => void): Unsubscribe => on(push.updateStatus, cb),
+    /** Windows/Linux: installs what's already downloaded and restarts. macOS: opens the release page instead. */
+    install: (): Promise<void> => ipcRenderer.invoke(invoke.updateInstall),
   },
 };
 

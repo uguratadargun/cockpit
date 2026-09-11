@@ -26,6 +26,7 @@ import { ensureShim, writeSessionSettings } from "./hookShim";
 import { loginShellEnv, PtyManager, registerPtyIpc } from "./pty";
 import { discoverSessions, readRunPointer, watchSessions } from "./sessions";
 import { findClaude, installPlugin, setupStatus, updatePlugin } from "./setup";
+import { initUpdater, installUpdate } from "./updater";
 
 /**
  * The main process: one window, and the four things it shows wired together.
@@ -587,6 +588,8 @@ function registerIpc(): void {
     win?.show();
     win?.focus();
   });
+
+  ipcMain.handle(invoke.updateInstall, () => installUpdate());
 }
 
 // -------------------------------------------------------------------- boot
@@ -638,6 +641,7 @@ app.whenReady().then(async () => {
     void refreshExecutions();
   }
   win = createWindow();
+  initUpdater(send);
 });
 
 app.on("window-all-closed", () => {

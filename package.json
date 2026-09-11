@@ -1,6 +1,6 @@
 {
   "name": "gate-cockpit",
-  "version": "0.1.5",
+  "version": "0.1.6",
   "private": true,
   "description": "One window for every gate run you are driving: the terminals, the questions they ask, the approvals they wait for, and the workflow each one is walking.",
   "main": "out/main/index.js",
@@ -34,7 +34,9 @@
       "node_modules/node-pty/**/*"
     ],
     "publish": {
-      "provider": "github"
+      "provider": "github",
+      "owner": "uguratadargun",
+      "repo": "cockpit"
     },
     "mac": {
       "target": [
@@ -65,6 +67,7 @@
     "@xterm/xterm": "^5.5.0",
     "@xyflow/react": "^12.11.6",
     "clsx": "^2.1.1",
+    "electron-updater": "^6.3.9",
     "js-yaml": "^4.1.0",
     "lucide-react": "^0.474.0",
     "node-pty": "^1.1.0",

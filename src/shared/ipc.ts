@@ -38,12 +38,15 @@ export const invoke = {
   gateUsage: "gate:usage",
   // window
   windowFocus: "window:focus",
+  // update
+  updateInstall: "update:install",
 } as const;
 
 export const push = {
   sessionsChanged: "sessions:changed",
   asksChanged: "asks:changed",
   executionEvent: "executions:event",
+  updateStatus: "update:status",
   /** Per terminal: `pty:data:<ptyId>` carries bytes, `pty:exit:<ptyId>` the exit code. */
   ptyData: (ptyId: string) => `pty:data:${ptyId}`,
   ptyExit: (ptyId: string) => `pty:exit:${ptyId}`,

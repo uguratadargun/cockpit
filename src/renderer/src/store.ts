@@ -13,6 +13,7 @@ import type {
   Result,
   SetupStatus,
   StreamFrame,
+  UpdateStatus,
   WorkflowEvent,
   WorkflowGraph,
   WorkflowSummary,
@@ -66,6 +67,8 @@ interface CockpitState {
   usage: GateUsage | null;
   usageError: string | null;
   usageAt: number;
+  /** A newer release than this one, once the main process's periodic check finds it. */
+  update: UpdateStatus | null;
 
   section: Section;
   selectedSessionId: string | null;
@@ -120,6 +123,8 @@ interface CockpitState {
   /** Starts a run: a new session in the project, with `/gate:run <workflow> <task>` as its first prompt. */
   startRun: (cwd: string, workflowId: string, task: string) => Promise<Result<{ ptyId: string }>>;
   cancelExecution: (id: string) => Promise<Result>;
+  /** Windows/Linux: installs the downloaded update and restarts. macOS: opens the release page. */
+  installUpdate: () => Promise<void>;
 }
 
 export type Theme = "dark" | "light";
@@ -223,6 +228,7 @@ export const useStore = create<CockpitState>((set, get) => ({
   usage: null,
   usageError: null,
   usageAt: 0,
+  update: null,
   section: "sessions",
   selectedSessionId: null,
   selectedPtyId: null,
@@ -285,6 +291,7 @@ export const useStore = create<CockpitState>((set, get) => ({
           void get().refreshExecutions();
         }
       });
+      window.cockpit.update.onStatus((update) => set({ update }));
     }
 
     const [setup, sessions, pending, executions] = await Promise.all([
@@ -473,6 +480,10 @@ export const useStore = create<CockpitState>((set, get) => ({
     const result = await window.cockpit.executions.cancel(id);
     if (result.ok) await get().refreshExecutions();
     return result;
+  },
+
+  installUpdate: async () => {
+    await window.cockpit.update.install();
   },
 }));
 
