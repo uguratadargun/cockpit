@@ -1,6 +1,7 @@
 // The hook plane end to end: the shim script, the settings file, the socket
 // path and HookServer, driven over a real unix socket by the real shim running
 // under plain node (node:test, no Electron).
+import "./_tmp.mjs";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { build } from "esbuild";

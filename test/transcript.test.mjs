@@ -1,4 +1,5 @@
 // The transcript reader against Claude Code's JSONL shape (node:test, no Electron).
+import "./_tmp.mjs";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { build } from "esbuild";
