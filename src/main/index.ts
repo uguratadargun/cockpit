@@ -65,6 +65,54 @@ function statusFor(sessionId: string | null, live: { alive: boolean; hasOutput: 
   return status;
 }
 
+/**
+ * Idle terminals are put to sleep.
+ *
+ * A `claude` at its prompt holds 150-400 MB, and a person who opened six
+ * runs in a morning has six of them by lunch. One that has been idle this
+ * long — nothing typed, nothing printed, no question out, no run in its
+ * hands — is ended; its transcript is the session, so clicking it resumes
+ * exactly where it was. `COCKPIT_HIBERNATE_MIN` overrides the default; 0
+ * turns it off.
+ */
+const HIBERNATE_MS = Math.max(0, Number(process.env.COCKPIT_HIBERNATE_MIN ?? 30)) * 60_000;
+/** When each terminal was last seen doing anything: output, a keystroke, a hook. */
+const lastAliveAt = new Map<string, number>();
+
+function touch(ptyId: string, at = Date.now()): void {
+  lastAliveAt.set(ptyId, at);
+}
+
+/** Whether a terminal may be put to sleep now: idle long enough, nothing waiting on it, no run in its hands. */
+function hibernatable(ptyId: string, now: number): boolean {
+  const live = ptys.get(ptyId);
+  if (!live?.alive) return false;
+  const since = Math.max(lastAliveAt.get(ptyId) ?? 0, live.lastOutputAt);
+  if (!since || now - since < HIBERNATE_MS) return false;
+  const sid = sessionOfPty.get(ptyId);
+  if (!sid) return false; // never heard from: too new to judge
+  if (statusFor(sid, live, now) !== "idle") return false;
+  if (hooks.pending().some((p) => p.sessionId === sid)) return false;
+  const run = readRunPointer(sid);
+  if (run && (run.state === "agent" || run.state === "wait" || run.state === "delegate")) {
+    const execution = executions.find((e) => e.id === run.executionId);
+    if (!execution || execution.status === "running") return false;
+  }
+  return true;
+}
+
+async function hibernateIdle(): Promise<void> {
+  if (!HIBERNATE_MS) return;
+  const now = Date.now();
+  for (const p of ptys.list()) {
+    if (!hibernatable(p.ptyId, now)) continue;
+    const sid = sessionOfPty.get(p.ptyId);
+    await ptys.kill(p.ptyId);
+    if (sid) statusOf.set(sid, { status: "exited", at: now });
+    sessionsChanged();
+  }
+}
+
 /** Live events per run, from the stream; what `executions:events` serves after the recorded steps. */
 const liveEvents = new Map<string, WorkflowEvent[]>();
 let executions: Execution[] = [];
@@ -226,6 +274,7 @@ function typeWhenReady(ptyId: string, text: string): void {
 
 function onHook(e: SessionHookEvent): void {
   if (e.ptyId) {
+    touch(e.ptyId, e.at);
     const known = sessionOfPty.get(e.ptyId);
     if (known !== e.sessionId) {
       sessionOfPty.set(e.ptyId, e.sessionId);
@@ -477,8 +526,12 @@ app.whenReady().then(async () => {
     if (sid) statusOf.set(sid, { status: "exited", at: Date.now() });
     sessionsChanged();
   });
-  ptys.onOutput(() => sessionsChanged());
+  ptys.onOutput((ptyId, at) => {
+    touch(ptyId, at);
+    sessionsChanged();
+  });
   watchSessions(sessionsChanged);
+  if (HIBERNATE_MS) setInterval(() => void hibernateIdle(), 60_000).unref();
 
   connectGate();
   if (gate) {

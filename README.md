@@ -26,6 +26,11 @@ node it is on. Answering in the window continues the run in its terminal.
   told to do to `~/.gate/sessions/<session>.json`, including whether the node
   is a `question` or an `approval`; the cockpit reads it to sort the two
   panels and to name the run and node on each session.
+- **Idle terminals go to sleep.** A `claude` at its prompt holds a few
+  hundred megabytes, and six of them add up. A terminal idle for thirty
+  minutes — nothing typed or printed, no question out, no run in its hands —
+  is ended; its transcript is the session, so clicking it resumes it where it
+  was. `COCKPIT_HIBERNATE_MIN` changes the wait; `0` turns it off.
 - **Runs are yours.** The app authenticates with your own `gatec_…` token,
   the one the Team page hands out, and gate's client API shows it the runs you
   started and nothing else — a snapshot of the unfinished ones, then every
