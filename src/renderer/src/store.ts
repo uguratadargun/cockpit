@@ -1,6 +1,8 @@
 import { create } from "zustand";
 import { useShallow } from "zustand/react/shallow";
 
+import { setTerminalTheme } from "@/components/terminalPool";
+
 import type {
   AskAnswer,
   ClaudeSession,
@@ -76,6 +78,8 @@ interface CockpitState {
   selectedProject: string | null;
   /** Projects added by hand, kept across launches; a directory with no sessions yet. */
   pinnedProjects: string[];
+  /** Dark or light; kept across launches, applied to the document and every terminal. */
+  theme: Theme;
   /**
    * Projects taken off the list, with when. A project found through its
    * sessions cannot be deleted — the sessions are on disk — so it is hidden
@@ -93,6 +97,7 @@ interface CockpitState {
   updatePlugin: () => Promise<Result>;
   connectGate: (token: string) => Promise<Result<SetupStatus>>;
 
+  setTheme: (theme: Theme) => void;
   selectProject: (path: string | null) => void;
   pinProject: (path: string) => void;
   /** Takes a project off the list: unpins it, and hides it until something new happens there. */
@@ -117,7 +122,16 @@ interface CockpitState {
   cancelExecution: (id: string) => Promise<Result>;
 }
 
+export type Theme = "dark" | "light";
+
 const LAST_CWD_KEY = "cockpit.lastCwd";
+const THEME_KEY = "cockpit.theme";
+
+/** The document's class and the terminals' palette follow the store; nothing else reads the theme. */
+function applyTheme(theme: Theme): void {
+  document.documentElement.classList.toggle("light", theme === "light");
+  setTerminalTheme(theme);
+}
 const PROJECT_KEY = "cockpit.selectedProject";
 const PINNED_KEY = "cockpit.pinnedProjects";
 const HIDDEN_KEY = "cockpit.hiddenProjects";
@@ -212,10 +226,12 @@ export const useStore = create<CockpitState>((set, get) => ({
   lastCwd: readLastCwd(),
   selectedProject: readJson<string | null>(PROJECT_KEY, null),
   pinnedProjects: readJson<string[]>(PINNED_KEY, []),
+  theme: readJson<Theme>(THEME_KEY, "dark"),
   hiddenProjects: readJson<Record<string, number>>(HIDDEN_KEY, {}),
   arrivals: { projects: 0, sessions: 0, questions: 0, approvals: 0, executions: 0 },
 
   init: async () => {
+    applyTheme(get().theme);
     if (!subscribed) {
       subscribed = true;
       window.cockpit.sessions.onChange((sessions) => {
@@ -296,6 +312,12 @@ export const useStore = create<CockpitState>((set, get) => ({
     const result = await window.cockpit.setup.updatePlugin();
     await get().refreshSetup();
     return result;
+  },
+
+  setTheme: (theme) => {
+    writeJson(THEME_KEY, theme);
+    applyTheme(theme);
+    set({ theme });
   },
 
   selectProject: (path) => {
@@ -411,9 +433,14 @@ export const useStore = create<CockpitState>((set, get) => ({
   },
 
   loadWorkflows: async () => {
-    const result = await window.cockpit.executions.workflows();
-    if (result.ok) set({ workflows: result.value, workflowsError: null });
-    else set({ workflowsError: result.error });
+    try {
+      const result = await window.cockpit.executions.workflows();
+      if (result.ok) set({ workflows: result.value, workflowsError: result.value.length ? null : "the team's mirror lists no workflows — run /gate:login or any gate command to pull it" });
+      else set({ workflowsError: result.error });
+    } catch (e) {
+      // A main process older than this renderer (dev without a restart) has no handler for the call.
+      set({ workflowsError: `${(e as Error).message} — restart the app if it was updated while running` });
+    }
   },
 
   startRun: async (cwd, workflowId, task) => {

@@ -1,5 +1,5 @@
 import clsx from "clsx";
-import { FolderOpen, MessageCircleQuestion, ShieldCheck, Terminal, Workflow, type LucideIcon } from "lucide-react";
+import { FolderOpen, MessageCircleQuestion, Moon, ShieldCheck, Sun, Terminal, Workflow, type LucideIcon } from "lucide-react";
 import { useEffect, useState, type CSSProperties } from "react";
 
 import { Badge } from "@/components/Badge";
@@ -47,14 +47,14 @@ function Shell() {
           marked draggable, and on macOS the traffic lights sit in the first
           ~70px of it, so the title starts after them. */}
       <div
-        className="flex h-9 shrink-0 select-none items-center gap-2 border-b border-zinc-800 bg-[#0c0e12] pr-3 pl-20"
+        className="flex h-9 shrink-0 select-none items-center gap-2 border-b border-zinc-800 bg-[var(--surface-2)] pr-3 pl-20"
         style={{ WebkitAppRegion: "drag" } as CSSProperties}
       >
         <span className="text-xs font-semibold text-zinc-200">gate cockpit</span>
         <span className="text-[10px] text-zinc-600">{window.cockpit.version}</span>
       </div>
       <div className="flex min-h-0 flex-1">
-      <nav className="flex w-[220px] shrink-0 flex-col border-r border-zinc-800 bg-[#0c0e12] pt-2">
+      <nav className="flex w-[220px] shrink-0 flex-col border-r border-zinc-800 bg-[var(--surface-2)] pt-2">
         <ul className="flex flex-col gap-0.5 px-2">
           {SECTIONS.map((key) => {
             const { label, icon: Icon, tone } = NAV[key];
@@ -87,6 +87,7 @@ function Shell() {
           )}
           <UsageLine />
           <PluginLine />
+          <ThemeSwitch />
         </div>
       </nav>
 
@@ -97,7 +98,7 @@ function Shell() {
           <TerminalStage />
         </div>
         {section !== "sessions" && (
-          <div className="absolute inset-0 z-10 flex bg-[#0f1115]">
+          <div className="absolute inset-0 z-10 flex bg-[var(--surface-0)]">
             {section === "projects" && <Projects />}
             {section === "questions" && <Questions />}
             {section === "approvals" && <Approvals />}
@@ -240,6 +241,24 @@ function UsageLine() {
           </span>
         );
       })}
+    </button>
+  );
+}
+
+/** Dark or light. One click, kept for next time, and every terminal follows. */
+function ThemeSwitch() {
+  const theme = useStore((s) => s.theme);
+  const setTheme = useStore((s) => s.setTheme);
+  const next = theme === "dark" ? "light" : "dark";
+  return (
+    <button
+      type="button"
+      onClick={() => setTheme(next)}
+      title={`Switch to the ${next} theme`}
+      className="mt-0.5 flex items-center gap-1.5 self-start rounded px-1 py-0.5 text-zinc-500 hover:bg-zinc-800 hover:text-zinc-200"
+    >
+      {theme === "dark" ? <Sun size={11} /> : <Moon size={11} />}
+      <span>{theme === "dark" ? "light theme" : "dark theme"}</span>
     </button>
   );
 }

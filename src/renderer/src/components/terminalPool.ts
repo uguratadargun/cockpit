@@ -74,6 +74,40 @@ export interface TerminalEntry {
 
 const pool = new Map<string, TerminalEntry>();
 
+/** The same palette on white: GitHub's light ANSI set, which stays legible for TUI colour pairs. */
+export const TERMINAL_THEME_LIGHT: ITheme = {
+  background: "#ffffff",
+  foreground: "#1f2328",
+  cursor: "#1f2328",
+  cursorAccent: "#ffffff",
+  selectionBackground: "#b6d7ff",
+  selectionInactiveBackground: "#d9e8fb",
+  black: "#24292f",
+  red: "#cf222e",
+  green: "#116329",
+  yellow: "#4d2d00",
+  blue: "#0969da",
+  magenta: "#8250df",
+  cyan: "#1b7c83",
+  white: "#6e7781",
+  brightBlack: "#57606a",
+  brightRed: "#a40e26",
+  brightGreen: "#1a7f37",
+  brightYellow: "#633c01",
+  brightBlue: "#218bff",
+  brightMagenta: "#a475f9",
+  brightCyan: "#3192aa",
+  brightWhite: "#8c959f",
+};
+
+let currentTheme: ITheme = TERMINAL_THEME;
+
+/** Switches every terminal, open or pooled, to the theme; new ones are created with it. */
+export function setTerminalTheme(mode: "dark" | "light"): void {
+  currentTheme = mode === "light" ? TERMINAL_THEME_LIGHT : TERMINAL_THEME;
+  for (const entry of pool.values()) entry.term.options.theme = currentTheme;
+}
+
 /** Follow output only while the viewport is at (or one line above) the bottom,
  *  so a user reading history is not yanked down by every new byte. */
 function shouldFollowOutput(viewportY: number, baseY: number): boolean {
@@ -90,7 +124,7 @@ export function acquireTerminal(ptyId: string): TerminalEntry {
   host.style.height = "100%";
 
   const term = new Terminal({
-    theme: TERMINAL_THEME,
+    theme: currentTheme,
     fontFamily: TERMINAL_FONT_FAMILY,
     fontSize: TERMINAL_FONT_SIZE,
     // 1.0 so TUI box-drawing rows stay joined.

@@ -6,7 +6,7 @@
   "main": "out/main/index.js",
   "author": "Ugur Ata Dargun",
   "scripts": {
-    "dev": "electron-vite dev",
+    "dev": "electron-vite dev -w",
     "build": "electron-vite build",
     "preview": "electron-vite preview",
     "postinstall": "electron-rebuild -f -w node-pty && node tools/ensure-pty-perms.cjs && node tools/patch-node-pty-conpty.cjs",

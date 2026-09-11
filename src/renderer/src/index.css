@@ -1,10 +1,47 @@
 @import "tailwindcss";
 
+/*
+ * Two themes, one set of classes.
+ *
+ * Every panel is written in the zinc scale (bg-zinc-900, text-zinc-100 …).
+ * Tailwind 4 resolves those to CSS variables, so the light theme is the
+ * same scale turned over: zinc-950 becomes near-white, zinc-50 near-black,
+ * and every surface, border and label follows without a second class. The
+ * three page surfaces and the terminal's background are named here so no
+ * component carries a hex of its own.
+ */
 :root {
   color-scheme: dark;
+  --surface-0: #0f1115;
+  --surface-1: #121419;
+  --surface-2: #0c0e12;
+  --terminal-bg: #0b0e14;
+  --page-fg: #e6e6e6;
 }
+
+.light {
+  color-scheme: light;
+  --surface-0: #f6f6f7;
+  --surface-1: #ffffff;
+  --surface-2: #ebebee;
+  --terminal-bg: #ffffff;
+  --page-fg: #18181b;
+  --color-zinc-50: #09090b;
+  --color-zinc-100: #18181b;
+  --color-zinc-200: #27272a;
+  --color-zinc-300: #3f3f46;
+  --color-zinc-400: #52525b;
+  --color-zinc-500: #71717a;
+  --color-zinc-600: #a1a1aa;
+  --color-zinc-700: #d4d4d8;
+  --color-zinc-800: #e4e4e7;
+  --color-zinc-900: #f4f4f5;
+  --color-zinc-950: #fafafa;
+  --color-black: #ffffff;
+}
+
 html, body, #root { height: 100%; margin: 0; }
-body { background: #0f1115; color: #e6e6e6; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif; }
+body { background: var(--surface-0); color: var(--page-fg); font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif; }
 
 /* Anything clickable inside a drag region stays clickable. */
 button, input, select, textarea, a, [role="button"] { -webkit-app-region: no-drag; }

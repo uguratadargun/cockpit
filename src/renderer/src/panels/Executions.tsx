@@ -28,7 +28,7 @@ export function Executions() {
 
   return (
     <section className="flex h-full min-w-0 flex-1">
-      <aside className="flex w-80 shrink-0 flex-col border-r border-zinc-800 bg-[#121419]">
+      <aside className="flex w-80 shrink-0 flex-col border-r border-zinc-800 bg-[var(--surface-1)]">
         <header className="flex items-center gap-2 border-b border-zinc-800 px-3 py-2">
           <Workflow size={14} className="text-zinc-400" />
           <span className="text-xs font-semibold uppercase tracking-wide text-zinc-400">Executions</span>
@@ -279,7 +279,7 @@ type WfNode = Node<WfData, "wf">;
 const LOOP_COLOR = "#f59e0b";
 const SKIP_COLOR = "#94a3b8";
 const TAKEN_COLOR = "#7dd3fc";
-const IDLE_COLOR = "#3f3f46";
+const IDLE_COLOR = "var(--color-zinc-600)";
 
 /** A card's colour is its kind, the same hues the dashboard uses: what a node *is* reads at a glance. */
 const KIND_CLASS: Record<string, string> = {
@@ -371,7 +371,7 @@ function WfEdgeView({ id, sourceX, sourceY, targetX, targetY, sourcePosition, ta
             }}
             title={typeof label === "string" ? label : undefined}
             className={clsx(
-              "pointer-events-auto absolute truncate rounded bg-[#0f1115]/90 px-1 py-0.5 text-[10px] text-zinc-400",
+              "pointer-events-auto absolute truncate rounded bg-[var(--surface-0)]/90 px-1 py-0.5 text-[10px] text-zinc-400",
               d && d.lane !== "forward" ? "max-w-[240px]" : "max-w-[104px]",
             )}
           >
@@ -387,6 +387,7 @@ const edgeTypes = { wf: WfEdgeView };
 
 function Graph({ graphId, events }: { graphId: string; events: WorkflowEvent[] }) {
   const graph = useStore((s) => s.graphs[graphId]);
+  const theme = useStore((s) => s.theme);
   const view = useMemo(() => deriveRunView(events), [events]);
   const placed = useMemo(() => (graph ? layoutGraph(graph) : []), [graph]);
   const loops = useMemo(() => (graph ? backEdges(graph) : new Set<string>()), [graph]);
@@ -475,7 +476,7 @@ function Graph({ graphId, events }: { graphId: string; events: WorkflowEvent[] }
       edges={edges}
       nodeTypes={nodeTypes}
       edgeTypes={edgeTypes}
-      colorMode="dark"
+      colorMode={theme}
       fitView
       fitViewOptions={{ padding: 0.15, maxZoom: 1.2 }}
       minZoom={0.2}
@@ -486,10 +487,10 @@ function Graph({ graphId, events }: { graphId: string; events: WorkflowEvent[] }
       panOnDrag
       zoomOnDoubleClick={false}
       proOptions={{ hideAttribution: true }}
-      className="bg-[#0f1115]"
+      className="bg-[var(--surface-0)]"
     >
-      <Background color="#27272a" gap={20} size={1} />
-      <Panel position="bottom-center" className="pointer-events-none !m-2 flex items-center gap-3 rounded-md border border-zinc-800 bg-[#0f1115]/85 px-2 py-1 text-[10px] text-zinc-400 backdrop-blur">
+      <Background color="var(--color-zinc-800)" gap={20} size={1} />
+      <Panel position="bottom-center" className="pointer-events-none !m-2 flex items-center gap-3 rounded-md border border-zinc-800 bg-[var(--surface-0)]/85 px-2 py-1 text-[10px] text-zinc-400 backdrop-blur">
         {Object.entries(KIND_COLOR).map(([kind, color]) => (
           <span key={kind} className="flex items-center gap-1">
             <span className="inline-block h-2 w-2 rounded-sm" style={{ background: color }} />
@@ -560,7 +561,7 @@ const LOG_MAX = 60;
 function EventLog({ events }: { events: WorkflowEvent[] }) {
   const tail = events.length > LOG_MAX ? events.slice(events.length - LOG_MAX) : events;
   return (
-    <div className="h-40 shrink-0 overflow-y-auto border-t border-zinc-800 bg-[#121419] px-3 py-1.5 font-mono text-[11px]">
+    <div className="h-40 shrink-0 overflow-y-auto border-t border-zinc-800 bg-[var(--surface-1)] px-3 py-1.5 font-mono text-[11px]">
       {tail.length === 0 && <div className="text-zinc-600">No events yet.</div>}
       {tail.map((e, i) => {
         const d = describe(e);

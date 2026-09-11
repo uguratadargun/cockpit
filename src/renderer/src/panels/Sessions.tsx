@@ -37,7 +37,7 @@ export function SessionsList({ className }: { className?: string }) {
   };
 
   return (
-    <aside className={clsx("flex w-72 shrink-0 flex-col border-r border-zinc-800 bg-[#121419]", className)}>
+    <aside className={clsx("flex w-72 shrink-0 flex-col border-r border-zinc-800 bg-[var(--surface-1)]", className)}>
       <div className="flex items-center gap-2 border-b border-zinc-800 px-3 py-2">
         <span className="text-xs font-semibold uppercase tracking-wide text-zinc-400">Sessions</span>
         <Button size="sm" variant="primary" className="ml-auto" onClick={() => setCreating((c) => !c)} title={selectedProject ? `New session in ${selectedProject}` : "New session"}>
@@ -201,7 +201,7 @@ export function TerminalStage() {
   const showing = selectedPtyId !== null;
 
   return (
-    <div className="relative h-full w-full bg-black">
+    <div className="relative h-full w-full bg-[var(--terminal-bg)]">
       {ptyIds.map((ptyId) => {
         const shown = ptyId === selectedPtyId;
         const active = shown && onStage;
