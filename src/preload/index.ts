@@ -13,6 +13,7 @@ import type {
   StreamFrame,
   WorkflowEvent,
   WorkflowGraph,
+  WorkflowSummary,
 } from "../shared/types";
 
 /**
@@ -69,6 +70,8 @@ const api = {
     events: (executionId: string): Promise<WorkflowEvent[]> => ipcRenderer.invoke(invoke.executionsEvents, executionId),
     cancel: (executionId: string): Promise<Result> => ipcRenderer.invoke(invoke.executionsCancel, executionId),
     graph: (workflowId: string): Promise<Result<WorkflowGraph>> => ipcRenderer.invoke(invoke.executionsGraph, workflowId),
+    /** The team's workflows, from the mirror on this machine. */
+    workflows: (): Promise<Result<WorkflowSummary[]>> => ipcRenderer.invoke(invoke.executionsWorkflows),
     onEvent: (cb: (frame: StreamFrame) => void): Unsubscribe => on(push.executionEvent, cb),
   },
   window: {

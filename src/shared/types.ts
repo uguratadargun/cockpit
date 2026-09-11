@@ -163,6 +163,15 @@ export interface WorkflowGraph {
   edges: Array<{ from: string; to: string; label?: string }>;
 }
 
+/** A workflow as the team's mirror lists it, enough to offer it for a run. */
+export interface WorkflowSummary {
+  id: string;
+  name: string;
+  description: string;
+  /** The run inputs it needs; `task` is the one a person types. */
+  inputs: string[];
+}
+
 // -------------------------------------------------------------------- setup
 
 export interface SetupStatus {

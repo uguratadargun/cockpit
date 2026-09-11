@@ -1,7 +1,7 @@
 import { BaseEdge, Background, EdgeLabelRenderer, getBezierPath, getSmoothStepPath, Handle, MarkerType, Panel, Position, ReactFlow, type Edge, type EdgeProps, type Node, type NodeProps } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
 import clsx from "clsx";
-import { Pause, Square, Workflow } from "lucide-react";
+import { Pause, Play, Square, Workflow } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 
 import type { Execution, WorkflowEvent } from "@shared/types";
@@ -12,7 +12,7 @@ import { RelativeTime } from "@/components/RelativeTime";
 import { clockTime, durationMs, shortId } from "@/lib/format";
 import { NODE_H, NODE_W, backEdges, deriveRunView, edgeId, edgeKey, layoutGraph, nodeState, skipEdges, type NodeState } from "@/lib/graph";
 import { Empty } from "@/panels/Questions";
-import { useExecutionById, useStore } from "@/store";
+import { useExecutionById, useProjects, useStore } from "@/store";
 
 const STATUS_PILL: Record<Execution["status"], string> = {
   running: "bg-sky-500/15 text-sky-300 border-sky-500/30",
@@ -24,6 +24,7 @@ export function Executions() {
   const executions = useStore((s) => s.executions);
   const selectedId = useStore((s) => s.selectedExecutionId);
   const selectExecution = useStore((s) => s.selectExecution);
+  const [starting, setStarting] = useState(false);
 
   return (
     <section className="flex h-full min-w-0 flex-1">
@@ -32,7 +33,11 @@ export function Executions() {
           <Workflow size={14} className="text-zinc-400" />
           <span className="text-xs font-semibold uppercase tracking-wide text-zinc-400">Executions</span>
           <span className="text-[11px] text-zinc-600">{executions.length}</span>
+          <Button size="sm" variant="primary" className="ml-auto" onClick={() => setStarting((v) => !v)} title="Start a run">
+            <Play size={12} /> New run
+          </Button>
         </header>
+        {starting && <NewRunForm onDone={() => setStarting(false)} />}
         <ul className="min-h-0 flex-1 overflow-y-auto">
           {executions.length === 0 && <li className="px-3 py-6 text-center text-xs text-zinc-500">No runs for you yet.</li>}
           {executions.map((e) => {
@@ -140,6 +145,118 @@ function ExecutionDetail({ id }: { id: string | null }) {
 
       <EventLog events={list} />
     </div>
+  );
+}
+
+// ----------------------------------------------------------------- new run
+
+/**
+ * A run starts the way it does in a terminal: a fresh session in the
+ * project, with `/gate:run <workflow> <task>` typed as its first prompt.
+ * The session then does what /gate:run does — settles the brief, asks what
+ * it must (in Questions), calls `begin` — and the run appears here on its
+ * own once it has. The form only spares the person the typing.
+ */
+function NewRunForm({ onDone }: { onDone: () => void }) {
+  const projects = useProjects();
+  const selectedProject = useStore((s) => s.selectedProject);
+  const lastCwd = useStore((s) => s.lastCwd);
+  const workflows = useStore((s) => s.workflows);
+  const workflowsError = useStore((s) => s.workflowsError);
+  const loadWorkflows = useStore((s) => s.loadWorkflows);
+  const startRun = useStore((s) => s.startRun);
+  const [cwd, setCwd] = useState(selectedProject ?? lastCwd ?? projects[0]?.path ?? "");
+  const [workflowId, setWorkflowId] = useState("");
+  const [task, setTask] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!workflows.length) void loadWorkflows();
+  }, [workflows.length, loadWorkflows]);
+  useEffect(() => {
+    if (!workflowId && workflows.length) setWorkflowId(workflows.find((w) => w.id === "dev")?.id ?? workflows[0].id);
+  }, [workflows, workflowId]);
+
+  const chosen = workflows.find((w) => w.id === workflowId) ?? null;
+  const needsTask = chosen ? chosen.inputs.includes("task") : true;
+  const known = projects.some((p) => p.path === cwd);
+
+  const start = async () => {
+    const dir = cwd.trim();
+    if (!dir || !workflowId || busy) return;
+    if (needsTask && !task.trim()) {
+      setError("say what the run should do");
+      return;
+    }
+    setBusy(true);
+    setError(null);
+    const result = await startRun(dir, workflowId, task);
+    setBusy(false);
+    if (result.ok) onDone();
+    else setError(result.error);
+  };
+
+  const field = "rounded border border-zinc-700 bg-zinc-950 px-2 py-1 text-[11px] text-zinc-100 placeholder:text-zinc-600 focus:border-sky-500 focus:outline-none";
+
+  return (
+    <form
+      className="flex flex-col gap-1.5 border-b border-zinc-800 bg-zinc-900/60 px-3 py-2"
+      onSubmit={(e) => {
+        e.preventDefault();
+        void start();
+      }}
+    >
+      <label className="text-[10px] uppercase tracking-wide text-zinc-500">Project</label>
+      {projects.length > 0 && (
+        <select value={known ? cwd : "__other"} onChange={(e) => setCwd(e.target.value === "__other" ? "" : e.target.value)} className={field}>
+          {projects.map((p) => (
+            <option key={p.path} value={p.path}>
+              {p.name} — {p.path}
+            </option>
+          ))}
+          <option value="__other">another directory…</option>
+        </select>
+      )}
+      {(!known || projects.length === 0) && (
+        <input value={cwd} onChange={(e) => setCwd(e.target.value)} placeholder="/path/to/repo" spellCheck={false} className={clsx(field, "font-mono")} />
+      )}
+      <label className="text-[10px] uppercase tracking-wide text-zinc-500">Workflow</label>
+      {workflowsError ? (
+        <div className="text-[11px] text-rose-400">{workflowsError}</div>
+      ) : (
+        <select value={workflowId} onChange={(e) => setWorkflowId(e.target.value)} className={field}>
+          {workflows.map((w) => (
+            <option key={w.id} value={w.id}>
+              {w.name} ({w.id})
+            </option>
+          ))}
+        </select>
+      )}
+      {chosen?.description && <div className="text-[10px] leading-snug text-zinc-500">{chosen.description}</div>}
+      <label className="text-[10px] uppercase tracking-wide text-zinc-500">Task</label>
+      <textarea
+        autoFocus
+        value={task}
+        onChange={(e) => setTask(e.target.value)}
+        rows={3}
+        placeholder={needsTask ? "what should change, in a sentence or two" : "optional"}
+        className={clsx(field, "resize-y")}
+        onKeyDown={(e) => {
+          if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) void start();
+        }}
+      />
+      {error && <div className="text-[11px] text-rose-400">{error}</div>}
+      <div className="flex items-center gap-1.5">
+        <Button size="sm" variant="primary" type="submit" disabled={busy || !workflowId || !cwd.trim()}>
+          {busy ? "Starting…" : "Start run"}
+        </Button>
+        <Button size="sm" variant="ghost" onClick={onDone}>
+          Cancel
+        </Button>
+        <span className="ml-auto text-[10px] text-zinc-600">⌘↵ starts</span>
+      </div>
+    </form>
   );
 }
 

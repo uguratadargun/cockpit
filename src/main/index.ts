@@ -17,7 +17,7 @@ import type {
 } from "../shared/types";
 import { cockpitSockPath } from "../shared/sockPath";
 import { GateClient, parseConnectInput, readConnection, writeConnection } from "./gate";
-import { loadWorkflowGraph } from "./graph";
+import { listWorkflows, loadWorkflowGraph } from "./graph";
 import { HookServer, type SessionHookEvent } from "./hooks";
 import { ensureShim, writeSessionSettings } from "./hookShim";
 import { loginShellEnv, PtyManager, registerPtyIpc } from "./pty";
@@ -488,6 +488,7 @@ function registerIpc(): void {
     return gate.cancel(id);
   });
   ipcMain.handle(invoke.executionsGraph, (_e, workflowId: string) => loadWorkflowGraph(workflowId, teamId));
+  ipcMain.handle(invoke.executionsWorkflows, () => listWorkflows(teamId));
 
   ipcMain.handle(invoke.windowFocus, () => {
     win?.show();

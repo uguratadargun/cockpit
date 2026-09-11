@@ -3,7 +3,7 @@ import { join } from "node:path";
 
 import yaml from "js-yaml";
 
-import type { Result, WorkflowGraph } from "../shared/types";
+import type { Result, WorkflowGraph, WorkflowSummary } from "../shared/types";
 import { gateHome, readConnectedTeam } from "./gate";
 
 /**
@@ -147,6 +147,32 @@ export function resolveTeamDir(teamId?: string): Result<string> {
   if (dirs.length === 1) return { ok: true, value: join(cacheRoot(), dirs[0]) };
   if (dirs.length === 0) return { ok: false, error: `no team mirror under ${cacheRoot()} — run /gate:login first` };
   return { ok: false, error: `several team mirrors under ${cacheRoot()} (${dirs.join(", ")}) and no team to choose by` };
+}
+
+/** The team's workflows as the mirror's manifest lists them; what a run can be started from. */
+export function listWorkflows(teamId?: string): Result<WorkflowSummary[]> {
+  const team = resolveTeamDir(teamId);
+  if (!team.ok) return team;
+  let raw: { workflows?: unknown };
+  try {
+    raw = JSON.parse(readFileSync(join(team.value, "manifest.json"), "utf8")) as { workflows?: unknown };
+  } catch (e) {
+    return { ok: false, error: `cannot read ${join(team.value, "manifest.json")}: ${(e as Error).message}` };
+  }
+  const list = Array.isArray(raw.workflows) ? (raw.workflows as Array<Record<string, unknown>>) : [];
+  const workflows: WorkflowSummary[] = [];
+  for (const w of list) {
+    const id = str(w.id);
+    if (!id) continue;
+    workflows.push({
+      id,
+      name: str(w.name) ?? id,
+      description: str(w.description) ?? "",
+      inputs: Array.isArray(w.inputs) ? w.inputs.filter((x): x is string => typeof x === "string") : [],
+    });
+  }
+  workflows.sort((a, b) => a.name.localeCompare(b.name));
+  return { ok: true, value: workflows };
 }
 
 export function loadWorkflowGraph(workflowId: string, teamId?: string): Result<WorkflowGraph> {

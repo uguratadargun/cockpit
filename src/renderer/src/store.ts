@@ -12,6 +12,7 @@ import type {
   StreamFrame,
   WorkflowEvent,
   WorkflowGraph,
+  WorkflowSummary,
 } from "@shared/types";
 
 export type Section = "projects" | "sessions" | "questions" | "approvals" | "executions";
@@ -55,6 +56,9 @@ interface CockpitState {
   events: Record<string, WorkflowEvent[]>;
   graphs: Record<string, WorkflowGraph>;
   graphErrors: Record<string, string>;
+  /** The team's workflows, for starting a run; loaded on first need. */
+  workflows: WorkflowSummary[];
+  workflowsError: string | null;
 
   section: Section;
   selectedSessionId: string | null;
@@ -101,6 +105,9 @@ interface CockpitState {
   selectExecution: (id: string | null) => void;
   loadEvents: (executionId: string) => Promise<void>;
   loadGraph: (workflowId: string) => Promise<void>;
+  loadWorkflows: () => Promise<void>;
+  /** Starts a run: a new session in the project, with `/gate:run <workflow> <task>` as its first prompt. */
+  startRun: (cwd: string, workflowId: string, task: string) => Promise<Result<{ ptyId: string }>>;
   cancelExecution: (id: string) => Promise<Result>;
 }
 
@@ -187,6 +194,8 @@ export const useStore = create<CockpitState>((set, get) => ({
   events: {},
   graphs: {},
   graphErrors: {},
+  workflows: [],
+  workflowsError: null,
   section: "sessions",
   selectedSessionId: null,
   selectedPtyId: null,
@@ -379,6 +388,19 @@ export const useStore = create<CockpitState>((set, get) => ({
     } else {
       set({ graphErrors: { ...get().graphErrors, [workflowId]: result.error } });
     }
+  },
+
+  loadWorkflows: async () => {
+    const result = await window.cockpit.executions.workflows();
+    if (result.ok) set({ workflows: result.value, workflowsError: null });
+    else set({ workflowsError: result.error });
+  },
+
+  startRun: async (cwd, workflowId, task) => {
+    // One line: a newline would submit the prompt early in the terminal.
+    const brief = task.replace(/\s*\n\s*/g, " ").trim();
+    const prompt = brief ? `/gate:run ${workflowId} ${brief}` : `/gate:run ${workflowId}`;
+    return get().startSession(cwd, prompt);
   },
 
   cancelExecution: async (id) => {
