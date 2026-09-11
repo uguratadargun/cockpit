@@ -1,0 +1,321 @@
+import { create } from "zustand";
+import { useShallow } from "zustand/react/shallow";
+
+import type {
+  AskAnswer,
+  ClaudeSession,
+  Execution,
+  Pending,
+  PermissionDecision,
+  Result,
+  SetupStatus,
+  StreamFrame,
+  WorkflowEvent,
+  WorkflowGraph,
+} from "@shared/types";
+
+export type Section = "sessions" | "questions" | "approvals" | "executions";
+
+export const SECTIONS: Section[] = ["sessions", "questions", "approvals", "executions"];
+
+/** Which nav badge a pending item counts under. */
+export function sectionOf(p: Pending): Section {
+  return p.kind === "question" ? "questions" : "approvals";
+}
+
+export function setupNeeded(status: SetupStatus | null): boolean {
+  if (!status) return false;
+  return !status.claude.found || !status.plugin.installed || !status.gate.connected;
+}
+
+interface CockpitState {
+  /** Initial fetches have landed. */
+  ready: boolean;
+  setup: SetupStatus | null;
+  /** The person pressed Continue on the setup screen (or setup was never needed). */
+  setupDismissed: boolean;
+
+  sessions: ClaudeSession[];
+  pending: Pending[];
+  executions: Execution[];
+  /** Events per execution; a key exists once `loadEvents` ran or a live frame arrived. */
+  events: Record<string, WorkflowEvent[]>;
+  graphs: Record<string, WorkflowGraph>;
+  graphErrors: Record<string, string>;
+
+  section: Section;
+  selectedSessionId: string | null;
+  /** The terminal on stage; follows the selected session's pty but survives a resume swapping it. */
+  selectedPtyId: string | null;
+  selectedExecutionId: string | null;
+  /** Last cwd a session was started from, offered as the default for the next one. */
+  lastCwd: string;
+
+  /** Timestamp of the last new pending item per section; the nav badge pulses briefly after it. */
+  arrivals: Record<Section, number>;
+
+  init: () => Promise<void>;
+  refreshSetup: () => Promise<SetupStatus>;
+  dismissSetup: () => void;
+  installPlugin: () => Promise<Result>;
+  connectGate: (token: string) => Promise<Result<SetupStatus>>;
+
+  setSection: (section: Section) => void;
+  selectSession: (session: ClaudeSession) => Promise<Result<{ ptyId: string }> | null>;
+  startSession: (cwd: string, prompt?: string) => Promise<Result<{ ptyId: string }>>;
+  closeSession: (ptyId: string) => Promise<void>;
+
+  answerAsk: (id: string, answer: AskAnswer) => Promise<Result>;
+  decidePermission: (id: string, decision: PermissionDecision) => Promise<Result>;
+
+  refreshExecutions: () => Promise<void>;
+  selectExecution: (id: string | null) => void;
+  loadEvents: (executionId: string) => Promise<void>;
+  loadGraph: (workflowId: string) => Promise<void>;
+  cancelExecution: (id: string) => Promise<Result>;
+}
+
+const LAST_CWD_KEY = "cockpit.lastCwd";
+
+function readLastCwd(): string {
+  try {
+    return window.localStorage.getItem(LAST_CWD_KEY) ?? "";
+  } catch {
+    return "";
+  }
+}
+
+function writeLastCwd(cwd: string): void {
+  try {
+    window.localStorage.setItem(LAST_CWD_KEY, cwd);
+  } catch {
+    /* storage may be unavailable; the default is a convenience */
+  }
+}
+
+/** Live first, then asleep; newest activity first inside each. */
+export function sortSessions(sessions: ClaudeSession[]): ClaudeSession[] {
+  return [...sessions].sort((a, b) => {
+    if (a.presence !== b.presence) return a.presence === "live" ? -1 : 1;
+    return b.lastActiveAt - a.lastActiveAt;
+  });
+}
+
+export function sortExecutions(executions: Execution[]): Execution[] {
+  return [...executions].sort((a, b) => {
+    if ((a.status === "running") !== (b.status === "running")) return a.status === "running" ? -1 : 1;
+    return b.startedAt - a.startedAt;
+  });
+}
+
+function applyFrame(executions: Execution[], frame: WorkflowEvent): Execution[] {
+  return executions.map((e) => {
+    if (e.id !== frame.executionId) return e;
+    switch (frame.type) {
+      case "run.paused":
+        return { ...e, pausedAt: frame.at };
+      case "run.resumed":
+        return { ...e, pausedAt: null, pausedMs: e.pausedMs + (e.pausedAt ? frame.at - e.pausedAt : 0) };
+      case "workflow.completed":
+        return { ...e, status: frame.status, finishedAt: frame.at, pausedAt: null };
+      case "workflow.failed":
+        return { ...e, status: "failed", finishedAt: frame.at, pausedAt: null, error: { code: frame.code, message: frame.message } };
+      default:
+        return e;
+    }
+  });
+}
+
+let subscribed = false;
+
+export const useStore = create<CockpitState>((set, get) => ({
+  ready: false,
+  setup: null,
+  setupDismissed: false,
+  sessions: [],
+  pending: [],
+  executions: [],
+  events: {},
+  graphs: {},
+  graphErrors: {},
+  section: "sessions",
+  selectedSessionId: null,
+  selectedPtyId: null,
+  selectedExecutionId: null,
+  lastCwd: readLastCwd(),
+  arrivals: { sessions: 0, questions: 0, approvals: 0, executions: 0 },
+
+  init: async () => {
+    if (!subscribed) {
+      subscribed = true;
+      window.cockpit.sessions.onChange((sessions) => {
+        const sorted = sortSessions(sessions);
+        const { selectedSessionId, selectedPtyId } = get();
+        const selected = sorted.find((s) => s.id === selectedSessionId) ?? sorted.find((s) => s.ptyId && s.ptyId === selectedPtyId);
+        set({
+          sessions: sorted,
+          selectedSessionId: selected?.id ?? selectedSessionId,
+          selectedPtyId: selected?.ptyId ?? selectedPtyId,
+        });
+      });
+      window.cockpit.asks.onChange((pending) => {
+        const known = new Set(get().pending.map((p) => p.id));
+        const arrivals = { ...get().arrivals };
+        const now = Date.now();
+        for (const p of pending) if (!known.has(p.id)) arrivals[sectionOf(p)] = now;
+        set({ pending: [...pending].sort((a, b) => b.askedAt - a.askedAt), arrivals });
+      });
+      window.cockpit.executions.onEvent((frame: StreamFrame) => {
+        if (frame.type === "snapshot") {
+          set({ executions: sortExecutions(frame.executions) });
+          return;
+        }
+        const { executions, events } = get();
+        const list = events[frame.executionId] ?? [];
+        set({
+          executions: applyFrame(executions, frame),
+          events: { ...events, [frame.executionId]: [...list, frame] },
+        });
+        if (frame.type === "workflow.started" && !executions.some((e) => e.id === frame.executionId)) {
+          void get().refreshExecutions();
+        }
+      });
+    }
+
+    const [setup, sessions, pending, executions] = await Promise.all([
+      window.cockpit.setup.status(),
+      window.cockpit.sessions.list(),
+      window.cockpit.asks.list(),
+      window.cockpit.executions.list(),
+    ]);
+    const sorted = sortSessions(sessions);
+    const first = sorted.find((s) => s.presence === "live") ?? null;
+    set({
+      ready: true,
+      setup,
+      setupDismissed: !setupNeeded(setup),
+      sessions: sorted,
+      pending: [...pending].sort((a, b) => b.askedAt - a.askedAt),
+      executions: sortExecutions(executions),
+      selectedSessionId: get().selectedSessionId ?? first?.id ?? null,
+      selectedPtyId: get().selectedPtyId ?? first?.ptyId ?? null,
+      lastCwd: get().lastCwd || sorted[0]?.cwd || "",
+    });
+  },
+
+  refreshSetup: async () => {
+    const setup = await window.cockpit.setup.status();
+    set({ setup });
+    return setup;
+  },
+
+  dismissSetup: () => set({ setupDismissed: true }),
+
+  installPlugin: async () => {
+    const result = await window.cockpit.setup.installPlugin();
+    await get().refreshSetup();
+    return result;
+  },
+
+  connectGate: async (token) => {
+    const result = await window.cockpit.setup.connect(token);
+    if (result.ok) set({ setup: result.value });
+    else await get().refreshSetup();
+    return result;
+  },
+
+  setSection: (section) => set({ section }),
+
+  selectSession: async (session) => {
+    set({ section: "sessions", selectedSessionId: session.id, selectedPtyId: session.ptyId });
+    if (session.presence === "live" && session.ptyId) return null;
+    const result = await window.cockpit.sessions.open(session.id);
+    if (result.ok) set({ selectedSessionId: session.id, selectedPtyId: result.value.ptyId });
+    return result;
+  },
+
+  startSession: async (cwd, prompt) => {
+    const result = await window.cockpit.sessions.start(cwd, prompt);
+    if (result.ok) {
+      writeLastCwd(cwd);
+      set({ section: "sessions", lastCwd: cwd, selectedPtyId: result.value.ptyId, selectedSessionId: null });
+    }
+    return result;
+  },
+
+  closeSession: async (ptyId) => {
+    await window.cockpit.sessions.close(ptyId);
+    if (get().selectedPtyId === ptyId) set({ selectedPtyId: null });
+  },
+
+  answerAsk: async (id, answer) => {
+    const result = await window.cockpit.asks.answer(id, answer);
+    if (result.ok) set({ pending: get().pending.filter((p) => p.id !== id) });
+    return result;
+  },
+
+  decidePermission: async (id, decision) => {
+    const result = await window.cockpit.asks.decide(id, decision);
+    if (result.ok) set({ pending: get().pending.filter((p) => p.id !== id) });
+    return result;
+  },
+
+  refreshExecutions: async () => {
+    const executions = await window.cockpit.executions.list();
+    set({ executions: sortExecutions(executions) });
+  },
+
+  selectExecution: (id) => {
+    set({ selectedExecutionId: id });
+    if (!id) return;
+    void get().loadEvents(id);
+    const execution = get().executions.find((e) => e.id === id);
+    if (execution && !get().graphs[execution.workflowId]) void get().loadGraph(execution.workflowId);
+  },
+
+  loadEvents: async (executionId) => {
+    const fetched = await window.cockpit.executions.events(executionId);
+    const lastAt = fetched.length ? fetched[fetched.length - 1].at : 0;
+    // Frames that arrived while the fetch was in flight are newer than anything fetched; keep them.
+    const live = (get().events[executionId] ?? []).filter((e) => e.at > lastAt);
+    set({ events: { ...get().events, [executionId]: [...fetched, ...live] } });
+  },
+
+  loadGraph: async (workflowId) => {
+    const result = await window.cockpit.executions.graph(workflowId);
+    if (result.ok) {
+      const { [workflowId]: _dropped, ...rest } = get().graphErrors;
+      set({ graphs: { ...get().graphs, [workflowId]: result.value }, graphErrors: rest });
+    } else {
+      set({ graphErrors: { ...get().graphErrors, [workflowId]: result.error } });
+    }
+  },
+
+  cancelExecution: async (id) => {
+    const result = await window.cockpit.executions.cancel(id);
+    if (result.ok) await get().refreshExecutions();
+    return result;
+  },
+}));
+
+// ------------------------------------------------------------------ selectors
+
+export function useBadgeCounts(): Record<Section, number> {
+  return useStore(
+    useShallow((s) => {
+    let questions = 0;
+    let approvals = 0;
+    for (const p of s.pending) {
+      if (p.kind === "question") questions += 1;
+      else approvals += 1;
+    }
+    const sessions = s.sessions.filter((x) => x.presence === "live" && (x.status === "waiting" || x.status === "blocked")).length;
+    const executions = s.executions.filter((x) => x.status === "running" && x.pausedAt !== null).length;
+    return { sessions, questions, approvals, executions };
+    }),
+  );
+}
+
+export function useExecutionById(id: string | null): Execution | null {
+  return useStore((s) => (id ? (s.executions.find((e) => e.id === id) ?? null) : null));
+}

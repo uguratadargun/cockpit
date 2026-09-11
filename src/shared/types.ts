@@ -1,0 +1,186 @@
+/**
+ * The words main, preload and renderer share. Nothing here imports anything.
+ *
+ * A cockpit is one window over several Claude Code sessions, each of which
+ * may be driving a gate run. Four things are on screen: the sessions (and
+ * their terminals), the questions those sessions have asked, the approvals
+ * they are waiting for, and the runs they are walking. These are those four.
+ */
+
+// ---------------------------------------------------------------- sessions
+
+/** `live` has a terminal in this window; `asleep` is a transcript on disk that `--resume` can wake. */
+export type SessionPresence = "live" | "asleep";
+
+/**
+ * What the session is doing, as its hooks report it. `waiting` is a question
+ * out (ours or the TUI's own idle prompt), `blocked` a permission prompt.
+ */
+export type SessionStatus = "working" | "idle" | "waiting" | "blocked" | "exited";
+
+/** What `~/.gate/sessions/<session>.json` says: the run this session was last told about. */
+export interface RunPointer {
+  executionId: string;
+  state: "agent" | "wait" | "delegate" | "done" | "failed" | "stopped";
+  nodeId: string | null;
+  agent: string | null;
+  asks: "question" | "approval" | null;
+  at: number;
+}
+
+export interface ClaudeSession {
+  /** Claude Code's own session id: the transcript's file name. */
+  id: string;
+  /** Set while this window owns a terminal for it. */
+  ptyId: string | null;
+  cwd: string;
+  /** The first prompt, or the name it was given; null for a session that never got one. */
+  title: string | null;
+  startedAt: number;
+  lastActiveAt: number;
+  presence: SessionPresence;
+  status: SessionStatus;
+  run: RunPointer | null;
+}
+
+// ------------------------------------------------------- questions/approvals
+
+export interface QuestionOption {
+  label: string;
+  description: string;
+}
+
+/** One question of an AskUserQuestion call, as Claude Code hands it to a hook. */
+export interface Question {
+  question: string;
+  header: string;
+  options: QuestionOption[];
+  multiSelect: boolean;
+}
+
+/**
+ * An AskUserQuestion held open by the hook until this window answers it.
+ * `kind` is the run's word for the node (`approval` for plan-review and
+ * acceptance, `question` otherwise), so the two panels split without reading
+ * the question's text.
+ */
+export interface PendingAsk {
+  id: string;
+  kind: "question" | "approval";
+  sessionId: string;
+  ptyId: string | null;
+  executionId: string | null;
+  nodeId: string | null;
+  cwd: string;
+  questions: Question[];
+  /** What the session said just before asking — the plan summary, the branch — from its transcript. */
+  context: string | null;
+  askedAt: number;
+}
+
+/** What goes back: the selected label (or the person's own words) per question text; `response` replaces them all. */
+export interface AskAnswer {
+  answers: Record<string, string | string[]>;
+  response?: string;
+}
+
+/** A permission prompt held open by the PermissionRequest hook. */
+export interface PendingPermission {
+  id: string;
+  kind: "permission";
+  sessionId: string;
+  ptyId: string | null;
+  executionId: string | null;
+  nodeId: string | null;
+  cwd: string;
+  toolName: string;
+  toolInput: Record<string, unknown>;
+  /** One line for the list: the command, the file, the plan's title. */
+  summary: string;
+  /** Permission rules Claude Code proposes so this is not asked again; echoed back on "always". */
+  suggestions: unknown[];
+  askedAt: number;
+}
+
+export type PermissionDecision = { behavior: "allow"; always?: boolean } | { behavior: "deny"; message: string };
+
+export type Pending = PendingAsk | PendingPermission;
+
+// -------------------------------------------------------------- executions
+
+/** A run as gate's client API returns it; only the fields the cockpit reads are named. */
+export interface Execution {
+  id: string;
+  workflowId: string;
+  status: "running" | "completed" | "failed";
+  startedAt: number;
+  finishedAt: number | null;
+  pausedAt: number | null;
+  pausedMs: number;
+  input: Record<string, unknown>;
+  error: { code: string; message: string } | null;
+  userId: string | null;
+  driver: "engine" | "session";
+  client: { host: string | null; repo: string | null; branch: string | null; session: string | null } | null;
+  stepCount: number;
+  [key: string]: unknown;
+}
+
+export interface NodeUsage {
+  model: string;
+  inputTokens: number;
+  outputTokens: number;
+  cacheReadTokens: number;
+}
+
+interface EventBase {
+  executionId: string;
+  at: number;
+}
+
+/** gate's own event union (src/events/types.ts there), plus the stream's opening snapshot. */
+export type WorkflowEvent =
+  | (EventBase & { type: "workflow.started"; workflowId: string; entry: string })
+  | (EventBase & { type: "node.started"; nodeId: string; stepIndex: number; visit: number })
+  | (EventBase & { type: "node.output"; nodeId: string; stepIndex: number; output: unknown })
+  | (EventBase & { type: "node.completed"; nodeId: string; stepIndex: number; durationMs: number; usage?: NodeUsage })
+  | (EventBase & { type: "node.failed"; nodeId: string; stepIndex: number; code: string; message: string })
+  | (EventBase & { type: "tool.called"; nodeId: string; stepIndex: number; tool: string; ok: boolean; summary: string; durationMs: number })
+  | (EventBase & { type: "edge.selected"; from: string; to: string; label?: string })
+  | (EventBase & { type: "run.paused"; nodeId: string })
+  | (EventBase & { type: "run.resumed"; nodeId: string })
+  | (EventBase & { type: "workflow.completed"; status: "completed" | "failed"; terminalNodeId: string })
+  | (EventBase & { type: "workflow.failed"; code: string; message: string; nodeId?: string });
+
+export type StreamFrame = WorkflowEvent | { type: "snapshot"; at: number; executions: Execution[] };
+
+/** A workflow as the team's mirror holds it, parsed enough to draw. */
+export interface WorkflowGraph {
+  id: string;
+  name: string;
+  entry: string;
+  nodes: Array<{ id: string; type: string; agent?: string; label?: string }>;
+  edges: Array<{ from: string; to: string; label?: string }>;
+}
+
+// -------------------------------------------------------------------- setup
+
+export interface SetupStatus {
+  claude: { found: boolean; version: string | null; path: string | null };
+  plugin: { installed: boolean; version: string | null };
+  gate: { connected: boolean; url: string | null; person: string | null; team: string | null };
+}
+
+export type Result<T = void> = { ok: true; value: T } | { ok: false; error: string };
+
+// ---------------------------------------------------------------- terminal
+
+export interface PtyInfo {
+  ptyId: string;
+  sessionId: string | null;
+  cwd: string;
+  pid: number;
+  alive: boolean;
+  hasOutput: boolean;
+  lastOutputAt: number;
+}
