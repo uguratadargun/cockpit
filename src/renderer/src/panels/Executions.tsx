@@ -358,9 +358,22 @@ function WfEdgeView({ id, sourceX, sourceY, targetX, targetY, sourcePosition, ta
       <BaseEdge id={id} path={path} markerEnd={markerEnd} style={style} />
       {label && (
         <EdgeLabelRenderer>
+          {/* A forward edge's midpoint is the gap between two cards, so its
+              label sits above the line and is cut to what fits there; a
+              lane's label has the whole stretch under or over the cards.
+              The full text is the tooltip. */}
           <div
-            style={{ transform: `translate(-50%, -50%) translate(${labelX}px, ${labelY}px)` }}
-            className="pointer-events-none absolute rounded bg-[#0f1115]/90 px-1 py-0.5 text-[10px] text-zinc-400"
+            style={{
+              transform:
+                d && d.lane !== "forward"
+                  ? `translate(-50%, -50%) translate(${labelX}px, ${labelY}px)`
+                  : `translate(-50%, -100%) translate(${labelX}px, ${labelY - 3}px)`,
+            }}
+            title={typeof label === "string" ? label : undefined}
+            className={clsx(
+              "pointer-events-auto absolute truncate rounded bg-[#0f1115]/90 px-1 py-0.5 text-[10px] text-zinc-400",
+              d && d.lane !== "forward" ? "max-w-[240px]" : "max-w-[104px]",
+            )}
           >
             {label}
           </div>

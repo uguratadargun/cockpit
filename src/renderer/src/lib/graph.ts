@@ -72,7 +72,8 @@ export interface Placed {
 
 export const NODE_W = 180;
 export const NODE_H = 56;
-export const COLUMN_WIDTH = 250;
+/** Wider than the dashboard's 250: the gap between two cards is where a forward edge's label lives. */
+export const COLUMN_WIDTH = 300;
 export const ROW_HEIGHT = 110;
 
 export function edgeId(from: string, to: string): string {
