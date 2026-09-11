@@ -42,6 +42,14 @@ import { findClaude, installPlugin, setupStatus, updatePlugin } from "./setup";
  *   their unfinished runs, then every event as it happens.
  */
 
+// Ubuntu 24.04+ blocks the unprivileged user namespace Chromium's sandbox wants unless an
+// AppArmor profile allows it, so it falls back to the setuid chrome-sandbox helper — which
+// then refuses to run because its packaged path/ownership isn't the root:root 4755 it demands.
+// Neither the .deb (installs to a path with a space) nor the AppImage (extracted per-run,
+// never root-owned) can satisfy that, so the sandbox is off on Linux; this renders only our
+// own local UI, never arbitrary web content, so the renderer sandbox buys little here anyway.
+if (process.platform === "linux") app.commandLine.appendSwitch("no-sandbox");
+
 let win: BrowserWindow | null = null;
 const ptys = new PtyManager();
 const hooks = new HookServer();

@@ -1,6 +1,6 @@
 {
   "name": "gate-cockpit",
-  "version": "0.1.3",
+  "version": "0.1.4",
   "private": true,
   "description": "One window for every gate run you are driving: the terminals, the questions they ask, the approvals they wait for, and the workflow each one is walking.",
   "main": "out/main/index.js",
