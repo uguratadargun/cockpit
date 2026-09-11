@@ -1,6 +1,6 @@
 {
   "name": "gate-cockpit",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "private": true,
   "description": "One window for every gate run you are driving: the terminals, the questions they ask, the approvals they wait for, and the workflow each one is walking.",
   "main": "out/main/index.js",
@@ -22,6 +22,7 @@
   "build": {
     "appId": "com.ulak.gate-cockpit",
     "productName": "Gate Cockpit",
+    "afterSign": "build/afterSignAdhoc.cjs",
     "directories": {
       "output": "release"
     },
@@ -40,7 +41,8 @@
         { "target": "dmg", "arch": ["arm64"] },
         { "target": "zip", "arch": ["arm64"] }
       ],
-      "category": "public.app-category.developer-tools"
+      "category": "public.app-category.developer-tools",
+      "identity": null
     },
     "win": {
       "target": [
