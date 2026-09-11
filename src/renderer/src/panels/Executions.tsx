@@ -1,4 +1,4 @@
-import { BaseEdge, Background, EdgeLabelRenderer, getBezierPath, getSmoothStepPath, Handle, MarkerType, Position, ReactFlow, type Edge, type EdgeProps, type Node, type NodeProps } from "@xyflow/react";
+import { BaseEdge, Background, EdgeLabelRenderer, getBezierPath, getSmoothStepPath, Handle, MarkerType, Panel, Position, ReactFlow, type Edge, type EdgeProps, type Node, type NodeProps } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
 import clsx from "clsx";
 import { Pause, Square, Workflow } from "lucide-react";
@@ -164,12 +164,32 @@ const SKIP_COLOR = "#94a3b8";
 const TAKEN_COLOR = "#7dd3fc";
 const IDLE_COLOR = "#3f3f46";
 
-const NODE_CLASS: Record<NodeState, string> = {
-  idle: "border-zinc-700 bg-zinc-900 text-zinc-300",
-  running: "border-sky-400 bg-sky-500/15 text-sky-100 shadow-[0_0_0_3px_rgba(56,189,248,0.2)]",
-  paused: "border-amber-400 bg-amber-500/15 text-amber-100 shadow-[0_0_0_3px_rgba(251,191,36,0.25)]",
-  completed: "border-zinc-800 bg-zinc-900/60 text-zinc-500",
-  failed: "border-rose-500 bg-rose-500/15 text-rose-100",
+/** A card's colour is its kind, the same hues the dashboard uses: what a node *is* reads at a glance. */
+const KIND_CLASS: Record<string, string> = {
+  agent: "border-sky-500/50 bg-sky-500/10",
+  command: "border-amber-500/50 bg-amber-500/10",
+  condition: "border-violet-500/50 bg-violet-500/10",
+  terminal: "border-emerald-500/50 bg-emerald-500/10",
+  parallel: "border-fuchsia-500/50 bg-fuchsia-500/10",
+};
+const KIND_FALLBACK = "border-zinc-700 bg-zinc-900";
+
+/** The dashboard's flat colours for the legend and the minimap. */
+const KIND_COLOR: Record<string, string> = {
+  agent: "#0ea5e9",
+  command: "#f59e0b",
+  condition: "#8b5cf6",
+  terminal: "#10b981",
+  parallel: "#d946ef",
+};
+
+/** What the run did to the card: a ring, as on the dashboard, so the kind's colour stays underneath. */
+const STATE_CLASS: Record<NodeState, string> = {
+  idle: "text-zinc-300",
+  running: "text-zinc-50 ring-2 ring-amber-500 animate-pulse",
+  paused: "text-amber-50 ring-2 ring-amber-400 shadow-[0_0_0_4px_rgba(251,191,36,0.2)]",
+  completed: "text-zinc-100 ring-2 ring-emerald-500",
+  failed: "text-rose-50 ring-2 ring-rose-500",
 };
 
 const handleClass = "!h-2 !w-2 !border-0";
@@ -181,7 +201,10 @@ const handleClass = "!h-2 !w-2 !border-0";
  */
 function WfNodeView({ data }: NodeProps<WfNode>) {
   return (
-    <div className={clsx("flex flex-col justify-center rounded-md border px-2.5 py-1.5 text-xs", NODE_CLASS[data.state])} style={{ width: NODE_W, height: NODE_H }}>
+    <div
+      className={clsx("flex flex-col justify-center rounded-md border px-2.5 py-1.5 text-xs shadow-sm", KIND_CLASS[data.type] ?? KIND_FALLBACK, STATE_CLASS[data.state])}
+      style={{ width: NODE_W, height: NODE_H }}
+    >
       <Handle id="in" type="target" position={Position.Left} className={clsx(handleClass, "!bg-zinc-600")} />
       {data.loopIn && <Handle id="loop-in" type="target" position={Position.Bottom} style={{ left: "32%", background: LOOP_COLOR }} className={handleClass} />}
       {data.loopOut && <Handle id="loop-out" type="source" position={Position.Bottom} style={{ left: "68%", background: LOOP_COLOR }} className={handleClass} />}
@@ -191,8 +214,9 @@ function WfNodeView({ data }: NodeProps<WfNode>) {
         <span className="truncate font-medium">{data.label}</span>
         {data.state === "running" && <span className="ml-auto h-1.5 w-1.5 shrink-0 animate-pulse rounded-full bg-sky-400" />}
       </div>
-      <div className="truncate text-[10px] opacity-70">
-        {data.state === "paused" ? "waiting for you" : [data.type, data.agent].filter(Boolean).join(" · ")}
+      <div className="flex items-center gap-1.5 truncate text-[10px] text-zinc-400">
+        <span className="uppercase tracking-wide">{data.type}</span>
+        {data.state === "paused" ? <span className="text-amber-300">waiting for you</span> : data.agent && <span className="truncate font-mono">{data.agent}</span>}
       </div>
       {!data.terminal && <Handle id="out" type="source" position={Position.Right} className={clsx(handleClass, "!bg-zinc-600")} />}
     </div>
@@ -335,6 +359,39 @@ function Graph({ graphId, events }: { graphId: string; events: WorkflowEvent[] }
       className="bg-[#0f1115]"
     >
       <Background color="#27272a" gap={20} size={1} />
+      <Panel position="bottom-center" className="pointer-events-none !m-2 flex items-center gap-3 rounded-md border border-zinc-800 bg-[#0f1115]/85 px-2 py-1 text-[10px] text-zinc-400 backdrop-blur">
+        {Object.entries(KIND_COLOR).map(([kind, color]) => (
+          <span key={kind} className="flex items-center gap-1">
+            <span className="inline-block h-2 w-2 rounded-sm" style={{ background: color }} />
+            {kind}
+          </span>
+        ))}
+        <span className="h-3 w-px bg-zinc-700" />
+        <span className="flex items-center gap-1">
+          <svg width="18" height="6" aria-hidden>
+            <line x1="0" y1="3" x2="18" y2="3" stroke="currentColor" strokeWidth="1.5" />
+          </svg>
+          goes on
+        </span>
+        <span className="flex items-center gap-1" style={{ color: LOOP_COLOR }}>
+          <svg width="18" height="6" aria-hidden>
+            <line x1="0" y1="3" x2="18" y2="3" stroke="currentColor" strokeWidth="1.5" strokeDasharray="4 3" />
+          </svg>
+          loops back
+        </span>
+        <span className="flex items-center gap-1" style={{ color: SKIP_COLOR }}>
+          <svg width="18" height="6" aria-hidden>
+            <line x1="0" y1="3" x2="18" y2="3" stroke="currentColor" strokeWidth="1.5" />
+          </svg>
+          skips ahead
+        </span>
+        <span className="flex items-center gap-1" style={{ color: TAKEN_COLOR }}>
+          <svg width="18" height="6" aria-hidden>
+            <line x1="0" y1="3" x2="18" y2="3" stroke="currentColor" strokeWidth="2" />
+          </svg>
+          taken
+        </span>
+      </Panel>
     </ReactFlow>
   );
 }
