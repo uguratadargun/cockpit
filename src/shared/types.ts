@@ -167,7 +167,8 @@ export interface WorkflowGraph {
 
 export interface SetupStatus {
   claude: { found: boolean; version: string | null; path: string | null };
-  plugin: { installed: boolean; version: string | null };
+  /** `latest` is what the gate serves (its plugin and server share a version); `updateAvailable` when it is newer than what is installed. */
+  plugin: { installed: boolean; version: string | null; latest: string | null; updateAvailable: boolean };
   gate: { connected: boolean; url: string | null; person: string | null; team: string | null };
 }
 

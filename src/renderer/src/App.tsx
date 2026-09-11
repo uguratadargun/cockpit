@@ -1,16 +1,18 @@
 import clsx from "clsx";
-import { MessageCircleQuestion, ShieldCheck, Terminal, Workflow, type LucideIcon } from "lucide-react";
-import { useEffect, type CSSProperties } from "react";
+import { FolderOpen, MessageCircleQuestion, ShieldCheck, Terminal, Workflow, type LucideIcon } from "lucide-react";
+import { useEffect, useState, type CSSProperties } from "react";
 
 import { Badge } from "@/components/Badge";
 import { Approvals } from "@/panels/Approvals";
 import { Executions } from "@/panels/Executions";
+import { Projects } from "@/panels/Projects";
 import { Questions } from "@/panels/Questions";
 import { SessionsList, TerminalStage } from "@/panels/Sessions";
 import { Setup } from "@/panels/Setup";
 import { SECTIONS, setupNeeded, useBadgeCounts, useStore, type Section } from "@/store";
 
 const NAV: Record<Section, { label: string; icon: LucideIcon; tone: "neutral" | "attention" }> = {
+  projects: { label: "Projects", icon: FolderOpen, tone: "neutral" },
   sessions: { label: "Sessions", icon: Terminal, tone: "neutral" },
   questions: { label: "Questions", icon: MessageCircleQuestion, tone: "attention" },
   approvals: { label: "Approvals", icon: ShieldCheck, tone: "attention" },
@@ -75,7 +77,7 @@ function Shell() {
             );
           })}
         </ul>
-        <div className="mt-auto border-t border-zinc-800 px-3 py-2 text-[10px] text-zinc-600">
+        <div className="mt-auto flex flex-col gap-1 border-t border-zinc-800 px-3 py-2 text-[10px] text-zinc-600">
           {setup?.gate.connected ? (
             <span className="truncate" title={setup.gate.url ?? undefined}>
               {setup.gate.person}@{setup.gate.team}
@@ -83,6 +85,7 @@ function Shell() {
           ) : (
             <span>gate not connected</span>
           )}
+          <PluginLine />
         </div>
       </nav>
 
@@ -94,6 +97,7 @@ function Shell() {
         </div>
         {section !== "sessions" && (
           <div className="absolute inset-0 z-10 flex bg-[#0f1115]">
+            {section === "projects" && <Projects />}
             {section === "questions" && <Questions />}
             {section === "approvals" && <Approvals />}
             {section === "executions" && <Executions />}
@@ -101,6 +105,59 @@ function Shell() {
         )}
       </main>
       </div>
+    </div>
+  );
+}
+
+/**
+ * The plugin's version, and the update when the gate serves a newer one.
+ *
+ * The gate and its plugin share a version, so a gate ahead of this machine
+ * is an update waiting. Clicking runs what /gate:update runs. A terminal
+ * already open keeps the plugin it started with; new ones get the update.
+ */
+function PluginLine() {
+  const setup = useStore((s) => s.setup);
+  const updatePlugin = useStore((s) => s.updatePlugin);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [done, setDone] = useState(false);
+  const plugin = setup?.plugin;
+  if (!plugin) return null;
+
+  const update = async () => {
+    if (busy) return;
+    setBusy(true);
+    setError(null);
+    const result = await updatePlugin();
+    setBusy(false);
+    if (result.ok) setDone(true);
+    else setError(result.error);
+  };
+
+  if (!plugin.installed) return <span>gate plugin not installed</span>;
+  return (
+    <div className="flex flex-col gap-0.5">
+      <div className="flex items-center gap-1.5">
+        <span className="truncate">gate plugin {plugin.version ?? "?"}</span>
+        {plugin.updateAvailable && !done && (
+          <button
+            type="button"
+            onClick={() => void update()}
+            disabled={busy}
+            title={`Update the plugin to ${plugin.latest} (what your gate serves)`}
+            className="ml-auto shrink-0 rounded bg-amber-500 px-1.5 py-0.5 font-medium text-black hover:bg-amber-400 disabled:opacity-60"
+          >
+            {busy ? "updating…" : `update to ${plugin.latest}`}
+          </button>
+        )}
+      </div>
+      {done && <span className="text-emerald-400">updated · new terminals use it</span>}
+      {error && (
+        <span className="text-rose-400" title={error}>
+          update failed: {error.split("\n")[0]}
+        </span>
+      )}
     </div>
   );
 }

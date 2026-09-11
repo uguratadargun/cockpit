@@ -14,9 +14,22 @@ import type {
   WorkflowGraph,
 } from "@shared/types";
 
-export type Section = "sessions" | "questions" | "approvals" | "executions";
+export type Section = "projects" | "sessions" | "questions" | "approvals" | "executions";
 
-export const SECTIONS: Section[] = ["sessions", "questions", "approvals", "executions"];
+export const SECTIONS: Section[] = ["projects", "sessions", "questions", "approvals", "executions"];
+
+/** A directory sessions run in: what the person thinks of as a project. */
+export interface Project {
+  path: string;
+  name: string;
+  sessions: number;
+  live: number;
+  /** Live sessions waiting on the person, plus questions and approvals pending from any session there. */
+  attention: number;
+  lastActiveAt: number;
+  /** Added by hand rather than found through a session; can be removed. */
+  pinned: boolean;
+}
 
 /** Which nav badge a pending item counts under. */
 export function sectionOf(p: Pending): Section {
@@ -50,6 +63,10 @@ interface CockpitState {
   selectedExecutionId: string | null;
   /** Last cwd a session was started from, offered as the default for the next one. */
   lastCwd: string;
+  /** The project the Sessions column is narrowed to; null shows every session. */
+  selectedProject: string | null;
+  /** Projects added by hand, kept across launches; a directory with no sessions yet. */
+  pinnedProjects: string[];
 
   /** Timestamp of the last new pending item per section; the nav badge pulses briefly after it. */
   arrivals: Record<Section, number>;
@@ -58,7 +75,12 @@ interface CockpitState {
   refreshSetup: () => Promise<SetupStatus>;
   dismissSetup: () => void;
   installPlugin: () => Promise<Result>;
+  updatePlugin: () => Promise<Result>;
   connectGate: (token: string) => Promise<Result<SetupStatus>>;
+
+  selectProject: (path: string | null) => void;
+  pinProject: (path: string) => void;
+  unpinProject: (path: string) => void;
 
   setSection: (section: Section) => void;
   selectSession: (session: ClaudeSession) => Promise<Result<{ ptyId: string }> | null>;
@@ -76,6 +98,25 @@ interface CockpitState {
 }
 
 const LAST_CWD_KEY = "cockpit.lastCwd";
+const PROJECT_KEY = "cockpit.selectedProject";
+const PINNED_KEY = "cockpit.pinnedProjects";
+
+function readJson<T>(key: string, fallback: T): T {
+  try {
+    const raw = localStorage.getItem(key);
+    return raw === null ? fallback : (JSON.parse(raw) as T);
+  } catch {
+    return fallback;
+  }
+}
+
+function writeJson(key: string, value: unknown): void {
+  try {
+    localStorage.setItem(key, JSON.stringify(value));
+  } catch {
+    // storage full or unavailable: the choice lasts the session
+  }
+}
 
 function readLastCwd(): string {
   try {
@@ -143,7 +184,9 @@ export const useStore = create<CockpitState>((set, get) => ({
   selectedPtyId: null,
   selectedExecutionId: null,
   lastCwd: readLastCwd(),
-  arrivals: { sessions: 0, questions: 0, approvals: 0, executions: 0 },
+  selectedProject: readJson<string | null>(PROJECT_KEY, null),
+  pinnedProjects: readJson<string[]>(PINNED_KEY, []),
+  arrivals: { projects: 0, sessions: 0, questions: 0, approvals: 0, executions: 0 },
 
   init: async () => {
     if (!subscribed) {
@@ -215,6 +258,39 @@ export const useStore = create<CockpitState>((set, get) => ({
     const result = await window.cockpit.setup.installPlugin();
     await get().refreshSetup();
     return result;
+  },
+
+  updatePlugin: async () => {
+    const result = await window.cockpit.setup.updatePlugin();
+    await get().refreshSetup();
+    return result;
+  },
+
+  selectProject: (path) => {
+    writeJson(PROJECT_KEY, path);
+    // Narrowing to a project drops a selection that is not in it, so the
+    // stage does not show a terminal the list no longer has.
+    const { sessions, selectedSessionId, selectedPtyId } = get();
+    const keep = path === null || sessions.some((s) => s.cwd === path && (s.id === selectedSessionId || (s.ptyId !== null && s.ptyId === selectedPtyId)));
+    set({
+      selectedProject: path,
+      section: "sessions",
+      ...(keep ? {} : { selectedSessionId: null, selectedPtyId: null }),
+      ...(path ? { lastCwd: path } : {}),
+    });
+  },
+
+  pinProject: (path) => {
+    const pinned = [...new Set([...get().pinnedProjects, path])];
+    writeJson(PINNED_KEY, pinned);
+    set({ pinnedProjects: pinned });
+  },
+
+  unpinProject: (path) => {
+    const pinned = get().pinnedProjects.filter((p) => p !== path);
+    writeJson(PINNED_KEY, pinned);
+    set({ pinnedProjects: pinned, ...(get().selectedProject === path ? { selectedProject: null } : {}) });
+    if (get().selectedProject === null) writeJson(PROJECT_KEY, null);
   },
 
   connectGate: async (token) => {
@@ -311,7 +387,31 @@ export function useBadgeCounts(): Record<Section, number> {
     }
     const sessions = s.sessions.filter((x) => x.presence === "live" && (x.status === "waiting" || x.status === "blocked")).length;
     const executions = s.executions.filter((x) => x.status === "running" && x.pausedAt !== null).length;
-    return { sessions, questions, approvals, executions };
+    return { projects: 0, sessions, questions, approvals, executions };
+    }),
+  );
+}
+
+/** The projects on this machine: every directory a session ran in, plus the ones added by hand. */
+export function useProjects(): Project[] {
+  return useStore(
+    useShallow((s) => {
+      const byPath = new Map<string, Project>();
+      const name = (path: string) => path.replace(/\/+$/, "").split("/").pop() || path;
+      for (const path of s.pinnedProjects) {
+        byPath.set(path, { path, name: name(path), sessions: 0, live: 0, attention: 0, lastActiveAt: 0, pinned: true });
+      }
+      const waitingSessions = new Set(s.pending.map((p) => p.sessionId));
+      for (const x of s.sessions) {
+        if (!x.cwd) continue;
+        const p = byPath.get(x.cwd) ?? { path: x.cwd, name: name(x.cwd), sessions: 0, live: 0, attention: 0, lastActiveAt: 0, pinned: false };
+        p.sessions += 1;
+        if (x.presence === "live") p.live += 1;
+        if ((x.presence === "live" && (x.status === "waiting" || x.status === "blocked")) || waitingSessions.has(x.id)) p.attention += 1;
+        p.lastActiveAt = Math.max(p.lastActiveAt, x.lastActiveAt);
+        byPath.set(x.cwd, p);
+      }
+      return [...byPath.values()].sort((a, b) => b.attention - a.attention || b.live - a.live || b.lastActiveAt - a.lastActiveAt);
     }),
   );
 }

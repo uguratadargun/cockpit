@@ -11,6 +11,7 @@ export const invoke = {
   setupStatus: "setup:status",
   setupInstallPlugin: "setup:install-plugin",
   setupConnect: "setup:connect",
+  setupUpdatePlugin: "setup:update-plugin",
   // sessions
   sessionsList: "sessions:list",
   sessionsOpen: "sessions:open",

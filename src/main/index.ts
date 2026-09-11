@@ -22,7 +22,7 @@ import { HookServer, type SessionHookEvent } from "./hooks";
 import { ensureShim, writeSessionSettings } from "./hookShim";
 import { loginShellEnv, PtyManager, registerPtyIpc } from "./pty";
 import { discoverSessions, readRunPointer, watchSessions } from "./sessions";
-import { findClaude, installPlugin, setupStatus } from "./setup";
+import { findClaude, installPlugin, setupStatus, updatePlugin } from "./setup";
 
 /**
  * The main process: one window, and the four things it shows wired together.
@@ -372,6 +372,7 @@ function registerIpc(): void {
     return status;
   });
   ipcMain.handle(invoke.setupInstallPlugin, () => installPlugin(loginShellEnv()));
+  ipcMain.handle(invoke.setupUpdatePlugin, () => updatePlugin(loginShellEnv()));
   ipcMain.handle(invoke.setupConnect, async (_e, input: string): Promise<Result<unknown>> => {
     const parsed = parseConnectInput(String(input ?? ""));
     if ("error" in parsed) return { ok: false, error: parsed.error };

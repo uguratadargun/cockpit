@@ -6,7 +6,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, test } from "node:test";
 
-const { PLUGIN_ID, PLUGIN_MARKETPLACE, findClaude, installPlugin, pluginStatus, setupStatus } = await import("../src/main/setup.ts");
+const { PLUGIN_ID, PLUGIN_MARKETPLACE, findClaude, installPlugin, isNewer, pluginStatus, setupStatus } = await import("../src/main/setup.ts");
 
 describe("setup", () => {
   let root;
@@ -54,7 +54,7 @@ describe("setup", () => {
   });
 
   test("pluginStatus reads installed_plugins.json and the install's own plugin.json", () => {
-    assert.deepEqual(pluginStatus(env()), { installed: false, version: null });
+    assert.deepEqual(pluginStatus(env()), { installed: false, version: null, latest: null, updateAvailable: false });
     const installPath = join(config, "plugins", "cache", "gateway", "gate", "0.33.0");
     mkdirSync(join(installPath, ".claude-plugin"), { recursive: true });
     writeFileSync(join(installPath, ".claude-plugin", "plugin.json"), JSON.stringify({ name: "gate", version: "0.33.1" }));
@@ -68,13 +68,13 @@ describe("setup", () => {
         },
       }),
     );
-    assert.deepEqual(pluginStatus(env()), { installed: true, version: "0.33.1" });
+    assert.deepEqual(pluginStatus(env()), { installed: true, version: "0.33.1", latest: null, updateAvailable: false });
     // An entry whose install directory is gone is not an install.
     writeFileSync(join(config, "plugins", "installed_plugins.json"), JSON.stringify({ version: 2, plugins: { [PLUGIN_ID]: [{ scope: "user", installPath: join(root, "gone"), version: "0.1.0" }] } }));
-    assert.deepEqual(pluginStatus(env()), { installed: false, version: null });
+    assert.deepEqual(pluginStatus(env()), { installed: false, version: null, latest: null, updateAvailable: false });
     // No installPath recorded: the version stands on its own.
     writeFileSync(join(config, "plugins", "installed_plugins.json"), JSON.stringify({ version: 2, plugins: { [PLUGIN_ID]: [{ scope: "user", version: "0.9.0" }] } }));
-    assert.deepEqual(pluginStatus(env()), { installed: true, version: "0.9.0" });
+    assert.deepEqual(pluginStatus(env()), { installed: true, version: "0.9.0", latest: null, updateAvailable: false });
   });
 
   test("installPlugin runs marketplace add then install --yes, non-interactively", async () => {
@@ -112,7 +112,7 @@ describe("setup", () => {
     const s1 = await setupStatus(env());
     assert.deepEqual(s1, {
       claude: { found: true, version: "2.1.266", path: join(bin, "claude") },
-      plugin: { installed: false, version: null },
+      plugin: { installed: false, version: null, latest: null, updateAvailable: false },
       gate: { connected: false, url: null, person: null, team: null },
     });
     process.env.GATE_URL = "http://127.0.0.1:1";
@@ -120,4 +120,13 @@ describe("setup", () => {
     const s2 = await setupStatus(env());
     assert.deepEqual(s2.gate, { connected: false, url: "http://127.0.0.1:1", person: null, team: null });
   });
+});
+
+test("isNewer: dotted numbers, missing parts as zero, garbage never newer", () => {
+  assert.equal(isNewer("0.34.0", "0.33.0"), true);
+  assert.equal(isNewer("0.33.0", "0.34.0"), false);
+  assert.equal(isNewer("0.34", "0.34.0"), false);
+  assert.equal(isNewer("1.0.0", "0.99.9"), true);
+  assert.equal(isNewer(null, "0.1.0"), false);
+  assert.equal(isNewer("dev", "0.1.0"), false);
 });

@@ -81,7 +81,7 @@ interface InstalledEntry {
  * `installPath` and `version`; the install itself lives under
  * plugins/cache/<marketplace>/<plugin>/<version>/ with a .claude-plugin/plugin.json.
  */
-export function pluginStatus(env: Record<string, string>): { installed: boolean; version: string | null } {
+export function pluginStatus(env: Record<string, string>): SetupStatus["plugin"] {
   const pluginsDir = join(claudeConfigDirFor(env), "plugins");
   let entries: InstalledEntry[] = [];
   try {
@@ -90,10 +90,10 @@ export function pluginStatus(env: Record<string, string>): { installed: boolean;
     if (Array.isArray(value)) entries = value as InstalledEntry[];
     else if (value && typeof value === "object") entries = [value as InstalledEntry];
   } catch {
-    return { installed: false, version: null };
+    return { installed: false, version: null, latest: null, updateAvailable: false };
   }
   const live = entries.filter((e) => !e.installPath || existsSync(e.installPath));
-  if (!live.length) return { installed: false, version: null };
+  if (!live.length) return { installed: false, version: null, latest: null, updateAvailable: false };
   const entry = live.find((e) => e.scope === "user") ?? live[0];
   let version = entry.version ?? null;
   if (entry.installPath) {
@@ -104,7 +104,37 @@ export function pluginStatus(env: Record<string, string>): { installed: boolean;
       // the recorded version stands
     }
   }
-  return { installed: true, version };
+  return { installed: true, version, latest: null, updateAvailable: false };
+}
+
+/** `a` is a newer version than `b`, comparing dotted numbers; anything unparsable is not newer. */
+export function isNewer(a: string | null, b: string | null): boolean {
+  if (!a || !b) return false;
+  const pa = a.split(".").map((x) => Number.parseInt(x, 10));
+  const pb = b.split(".").map((x) => Number.parseInt(x, 10));
+  if (pa.some(Number.isNaN) || pb.some(Number.isNaN)) return false;
+  for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
+    const x = pa[i] ?? 0;
+    const y = pb[i] ?? 0;
+    if (x !== y) return x > y;
+  }
+  return false;
+}
+
+/**
+ * The two commands /gate:update runs, in order: refresh the marketplace, then
+ * re-install from it. The second alone re-installs whatever the stale
+ * marketplace had. A terminal already running keeps the plugin it started
+ * with; the next one started gets the new version.
+ */
+export async function updatePlugin(env: Record<string, string>): Promise<Result> {
+  const claude = resolveClaudePath(env);
+  if (!claude) return { ok: false, error: "claude was not found on PATH — install Claude Code first" };
+  const refresh = await run(claude, ["plugin", "marketplace", "update", PLUGIN_MARKETPLACE_NAME], env, 180_000);
+  if (refresh.code !== 0) return { ok: false, error: describeFailure(`claude plugin marketplace update ${PLUGIN_MARKETPLACE_NAME}`, refresh) };
+  const update = await run(claude, ["plugin", "update", PLUGIN_ID], env, 180_000);
+  if (update.code !== 0) return { ok: false, error: describeFailure(`claude plugin update ${PLUGIN_ID}`, update) };
+  return { ok: true, value: undefined };
 }
 
 function knownMarketplaces(env: Record<string, string>): Set<string> {
@@ -197,6 +227,9 @@ export async function setupStatus(env: Record<string, string>): Promise<SetupSta
     try {
       const me = await new GateClient(conn).me({ signal: AbortSignal.timeout(8_000) });
       status.gate = { connected: true, url: conn.url, person: me.person, team: me.team };
+      // The gate's version is its plugin's version: the two are bumped together.
+      status.plugin.latest = me.version;
+      status.plugin.updateAvailable = plugin.installed && isNewer(me.version, plugin.version);
     } catch {
       // unreachable, or a key the server no longer takes: not connected, address kept
     }

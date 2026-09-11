@@ -1,5 +1,5 @@
 import clsx from "clsx";
-import { Moon, Plus, X } from "lucide-react";
+import { FolderOpen, Moon, Plus, X } from "lucide-react";
 import { useState } from "react";
 
 import type { ClaudeSession } from "@shared/types";
@@ -20,8 +20,15 @@ export function SessionsList({ className }: { className?: string }) {
   const selectSession = useStore((s) => s.selectSession);
   const closeSession = useStore((s) => s.closeSession);
   const pending = useStore((s) => s.pending);
+  const selectedProject = useStore((s) => s.selectedProject);
+  const selectProject = useStore((s) => s.selectProject);
+  const setSection = useStore((s) => s.setSection);
   const [creating, setCreating] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // The column shows one project's sessions when one is chosen; every session otherwise.
+  const shown = selectedProject ? sessions.filter((s) => s.cwd === selectedProject) : sessions;
+  const projectName = selectedProject ? selectedProject.replace(/\/+$/, "").split("/").pop() || selectedProject : null;
 
   const open = async (session: ClaudeSession) => {
     setError(null);
@@ -33,15 +40,40 @@ export function SessionsList({ className }: { className?: string }) {
     <aside className={clsx("flex w-72 shrink-0 flex-col border-r border-zinc-800 bg-[#121419]", className)}>
       <div className="flex items-center gap-2 border-b border-zinc-800 px-3 py-2">
         <span className="text-xs font-semibold uppercase tracking-wide text-zinc-400">Sessions</span>
-        <Button size="sm" variant="primary" className="ml-auto" onClick={() => setCreating((c) => !c)} title="New session">
+        <Button size="sm" variant="primary" className="ml-auto" onClick={() => setCreating((c) => !c)} title={selectedProject ? `New session in ${selectedProject}` : "New session"}>
           <Plus size={12} /> New
         </Button>
+      </div>
+      {/* Which project this column is narrowed to, and the way out of it. */}
+      <div className="flex items-center gap-1.5 border-b border-zinc-800 bg-zinc-900/40 px-3 py-1.5 text-[11px]">
+        <FolderOpen size={11} className="shrink-0 text-zinc-500" />
+        {projectName ? (
+          <>
+            <button type="button" className="truncate font-medium text-sky-300 hover:underline" title={selectedProject ?? undefined} onClick={() => setSection("projects")}>
+              {projectName}
+            </button>
+            <button type="button" className="ml-auto shrink-0 text-zinc-500 hover:text-zinc-200" onClick={() => selectProject(null)} title="Show sessions from every project">
+              all
+            </button>
+          </>
+        ) : (
+          <>
+            <span className="text-zinc-500">all projects</span>
+            <button type="button" className="ml-auto shrink-0 text-zinc-500 hover:text-zinc-200" onClick={() => setSection("projects")}>
+              choose
+            </button>
+          </>
+        )}
       </div>
       {creating && <NewSessionForm onDone={() => setCreating(false)} />}
       {error && <div className="border-b border-rose-900/50 bg-rose-950/40 px-3 py-1.5 text-[11px] text-rose-300">{error}</div>}
       <ul className="min-h-0 flex-1 overflow-y-auto">
-        {sessions.length === 0 && <li className="px-3 py-6 text-center text-xs text-zinc-500">No sessions yet. Start one above.</li>}
-        {sessions.map((s) => {
+        {shown.length === 0 && (
+          <li className="px-3 py-6 text-center text-xs text-zinc-500">
+            {selectedProject ? "No sessions in this project yet. Start one above." : "No sessions yet. Start one above."}
+          </li>
+        )}
+        {shown.map((s) => {
           const selected = s.id === selectedSessionId || (s.ptyId !== null && s.ptyId === selectedPtyId);
           const execution = s.run ? executions.find((e) => e.id === s.run?.executionId) : null;
           const waitingOnYou = pending.filter((p) => p.sessionId === s.id).length;
@@ -97,8 +129,10 @@ export function SessionsList({ className }: { className?: string }) {
 
 function NewSessionForm({ onDone }: { onDone: () => void }) {
   const lastCwd = useStore((s) => s.lastCwd);
+  const selectedProject = useStore((s) => s.selectedProject);
   const startSession = useStore((s) => s.startSession);
-  const [cwd, setCwd] = useState(lastCwd);
+  // The chosen project is where a new session goes; the field stays editable for the odd exception.
+  const [cwd, setCwd] = useState(selectedProject ?? lastCwd);
   const [prompt, setPrompt] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);

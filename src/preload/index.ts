@@ -37,6 +37,8 @@ const api = {
     status: (): Promise<SetupStatus> => ipcRenderer.invoke(invoke.setupStatus),
     installPlugin: (): Promise<Result> => ipcRenderer.invoke(invoke.setupInstallPlugin),
     connect: (token: string): Promise<Result<SetupStatus>> => ipcRenderer.invoke(invoke.setupConnect, token),
+    /** Refreshes the marketplace and re-installs the plugin; terminals started afterwards run the new one. */
+    updatePlugin: (): Promise<Result> => ipcRenderer.invoke(invoke.setupUpdatePlugin),
   },
   sessions: {
     list: (): Promise<ClaudeSession[]> => ipcRenderer.invoke(invoke.sessionsList),
