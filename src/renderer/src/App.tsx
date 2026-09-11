@@ -87,12 +87,12 @@ function Shell() {
                 className={clsx("ml-auto shrink-0", !setup.gate.live && "text-amber-500")}
                 title={
                   setup.gate.live
-                    ? `gate ${setup.gate.version ?? "?"} — runs update live`
-                    : `gate ${setup.gate.version ?? "?"} has no run stream; the list is refreshed every 10 s. gate 0.34.0 or later updates live.`
+                    ? `Your gate server is ${setup.gate.version ?? "?"}: runs update live.`
+                    : `Your gate server is ${setup.gate.version ?? "?"}, older than 0.34.0, so it cannot stream runs; the list is re-read every 10 s instead. This is the server's version, not the plugin's — updating the server fixes it.`
                 }
               >
-                gate {setup.gate.version ?? "?"}
-                {!setup.gate.live && " · polling"}
+                server {setup.gate.version ?? "?"}
+                {!setup.gate.live && " · no live updates"}
               </span>
             </span>
           ) : (
