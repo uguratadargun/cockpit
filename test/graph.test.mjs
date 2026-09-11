@@ -107,7 +107,8 @@ describe("parseWorkflowGraph", () => {
     );
     assert.deepEqual(g.nodes[0], { id: "base", type: "command", label: "Record the starting commit" });
     assert.deepEqual(g.nodes[1], { id: "planner", type: "agent", agent: "planner", label: "Plan" });
-    assert.deepEqual(g.nodes[11], { id: "nothing-changed", type: "terminal" });
+    // A terminal carries its status, so the layout can keep the main line off a failed exit.
+    assert.deepEqual(g.nodes[11], { id: "nothing-changed", type: "terminal", status: "failed" });
   });
 
   const edge = (from, to) => g.edges.find((e) => e.from === from && e.to === to);
