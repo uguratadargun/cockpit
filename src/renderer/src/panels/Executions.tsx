@@ -10,7 +10,7 @@ import { Pill } from "@/components/Badge";
 import { Button } from "@/components/Button";
 import { RelativeTime } from "@/components/RelativeTime";
 import { clockTime, durationMs, shortId } from "@/lib/format";
-import { NODE_H, NODE_W, deriveRunView, edgeKey, layoutGraph, nodeState, type NodeState } from "@/lib/graph";
+import { NODE_H, NODE_W, backEdges, deriveRunView, edgeId, edgeKey, layoutGraph, nodeState, type NodeState } from "@/lib/graph";
 import { Empty } from "@/panels/Questions";
 import { useExecutionById, useStore } from "@/store";
 
@@ -204,18 +204,23 @@ function Graph({ graphId, events }: { graphId: string; events: WorkflowEvent[] }
 
   const edges = useMemo<Edge[]>(() => {
     if (!graph) return [];
+    const back = backEdges(graph);
     return graph.edges.map((e, i) => {
       const taken = view.taken.has(edgeKey(e.from, e.to));
-      const color = taken ? "#7dd3fc" : "#3f3f46";
+      const loop = back.has(edgeId(e.from, e.to));
+      const color = taken ? "#7dd3fc" : loop ? "#52525b" : "#3f3f46";
       return {
         id: `${e.from}-${e.to}-${i}`,
         source: e.from,
         target: e.to,
         label: e.label,
-        type: "smoothstep",
+        // A loop goes back up: routed around the nodes, dashed, so it reads
+        // as "back to", not as one more step down.
+        type: loop ? "default" : "smoothstep",
+        pathOptions: loop ? { curvature: 0.6 } : { borderRadius: 10, offset: 24 },
         animated: taken && view.running !== null && view.running === e.to,
         markerEnd: { type: MarkerType.ArrowClosed, color, width: 14, height: 14 },
-        style: { stroke: color, strokeWidth: taken ? 1.8 : 1 },
+        style: { stroke: color, strokeWidth: taken ? 1.8 : 1, strokeDasharray: loop ? "5 4" : undefined },
         labelStyle: { fill: taken ? "#bae6fd" : "#71717a", fontSize: 10 },
         labelBgStyle: { fill: "#0f1115", fillOpacity: 0.9 },
         labelBgPadding: [3, 2] as [number, number],
@@ -238,7 +243,8 @@ function Graph({ graphId, events }: { graphId: string; events: WorkflowEvent[] }
       nodesDraggable={false}
       nodesConnectable={false}
       elementsSelectable={false}
-      panOnScroll
+      zoomOnScroll
+      panOnDrag
       zoomOnDoubleClick={false}
       proOptions={{ hideAttribution: true }}
       className="bg-[#0f1115]"

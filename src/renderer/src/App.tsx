@@ -1,6 +1,6 @@
 import clsx from "clsx";
 import { MessageCircleQuestion, ShieldCheck, Terminal, Workflow, type LucideIcon } from "lucide-react";
-import { useEffect } from "react";
+import { useEffect, type CSSProperties } from "react";
 
 import { Badge } from "@/components/Badge";
 import { Approvals } from "@/panels/Approvals";
@@ -40,12 +40,19 @@ function Shell() {
   const setup = useStore((s) => s.setup);
 
   return (
-    <div className="flex h-full w-full overflow-hidden">
-      <nav className="flex w-[220px] shrink-0 flex-col border-r border-zinc-800 bg-[#0c0e12]">
-        <div className="flex items-center gap-2 px-3 py-2.5">
-          <span className="text-sm font-semibold text-zinc-100">gate cockpit</span>
-          <span className="ml-auto text-[10px] text-zinc-600">{window.cockpit.version}</span>
-        </div>
+    <div className="flex h-full w-full flex-col overflow-hidden">
+      {/* The window's handle: a frameless window is moved by whatever is
+          marked draggable, and on macOS the traffic lights sit in the first
+          ~70px of it, so the title starts after them. */}
+      <div
+        className="flex h-9 shrink-0 select-none items-center gap-2 border-b border-zinc-800 bg-[#0c0e12] pr-3 pl-20"
+        style={{ WebkitAppRegion: "drag" } as CSSProperties}
+      >
+        <span className="text-xs font-semibold text-zinc-200">gate cockpit</span>
+        <span className="text-[10px] text-zinc-600">{window.cockpit.version}</span>
+      </div>
+      <div className="flex min-h-0 flex-1">
+      <nav className="flex w-[220px] shrink-0 flex-col border-r border-zinc-800 bg-[#0c0e12] pt-2">
         <ul className="flex flex-col gap-0.5 px-2">
           {SECTIONS.map((key) => {
             const { label, icon: Icon, tone } = NAV[key];
@@ -93,6 +100,7 @@ function Shell() {
           </div>
         )}
       </main>
+      </div>
     </div>
   );
 }
