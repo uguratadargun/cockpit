@@ -32,6 +32,8 @@ export const invoke = {
   executionsCancel: "executions:cancel",
   executionsGraph: "executions:graph",
   executionsWorkflows: "executions:workflows",
+  // gate
+  gateUsage: "gate:usage",
   // window
   windowFocus: "window:focus",
 } as const;

@@ -172,6 +172,24 @@ export interface WorkflowSummary {
   inputs: string[];
 }
 
+/** What the gate's account pool has left, as `gate usage` reports it: the pool's windows, shared by everyone on the gate. */
+export interface GateUsage {
+  windows: Array<{
+    /** As Anthropic names it: "five_hour", "seven_day", "seven_day_opus"… */
+    name: string;
+    /** Percent of the window still free, in the account best placed to serve. */
+    remaining: number;
+    resetsAt: string | null;
+    label?: string;
+  }>;
+  accounts: { total: number; enabled: number; available: number; coolingDown: number; quotaBlocked: number };
+  plan: string | null;
+  updatedAt: number | null;
+  floorPercent: number;
+  /** Why there is no window to show, when there is none. */
+  reason: string | null;
+}
+
 // -------------------------------------------------------------------- setup
 
 export interface SetupStatus {

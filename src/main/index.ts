@@ -490,6 +490,15 @@ function registerIpc(): void {
   ipcMain.handle(invoke.executionsGraph, (_e, workflowId: string) => loadWorkflowGraph(workflowId, teamId));
   ipcMain.handle(invoke.executionsWorkflows, () => listWorkflows(teamId));
 
+  ipcMain.handle(invoke.gateUsage, async (): Promise<Result<unknown>> => {
+    if (!gate) return { ok: false, error: "not connected to a gate" };
+    try {
+      return { ok: true, value: await gate.usage({ signal: AbortSignal.timeout(10_000) }) };
+    } catch (e) {
+      return { ok: false, error: (e as Error).message };
+    }
+  });
+
   ipcMain.handle(invoke.windowFocus, () => {
     win?.show();
     win?.focus();

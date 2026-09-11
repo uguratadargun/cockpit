@@ -85,6 +85,7 @@ function Shell() {
           ) : (
             <span>gate not connected</span>
           )}
+          <UsageLine />
           <PluginLine />
         </div>
       </nav>
@@ -159,5 +160,86 @@ function PluginLine() {
         </span>
       )}
     </div>
+  );
+}
+
+const WINDOW_LABELS: Record<string, string> = {
+  five_hour: "session",
+  seven_day: "weekly",
+  seven_day_opus: "Opus",
+  seven_day_sonnet: "Sonnet",
+  seven_day_fable: "Fable",
+};
+
+function windowName(w: { name: string; label?: string }): string {
+  if (w.label) return w.label.replace(/ limit$/i, "");
+  return WINDOW_LABELS[w.name] ?? w.name.replace(/_/g, " ");
+}
+
+function untilText(iso: string | null): string {
+  if (!iso) return "";
+  const ms = Date.parse(iso) - Date.now();
+  if (!Number.isFinite(ms) || ms <= 0) return "now";
+  const m = Math.round(ms / 60_000);
+  if (m < 60) return `${m}m`;
+  const h = Math.floor(m / 60);
+  if (h < 24) return `${h}h ${m % 60}m`;
+  return `${Math.floor(h / 24)}d ${h % 24}h`;
+}
+
+/**
+ * What the gate's pool has left: the numbers `/usage` shows before a session
+ * joins a gate, and stops showing after. They are the pool's, shared by
+ * everyone on it — the best account that can serve now, since that is the
+ * one a request would go to. Click to refresh; the store refreshes every
+ * minute anyway.
+ */
+function UsageLine() {
+  const setup = useStore((s) => s.setup);
+  const usage = useStore((s) => s.usage);
+  const usageError = useStore((s) => s.usageError);
+  const refreshUsage = useStore((s) => s.refreshUsage);
+  if (!setup?.gate.connected) return null;
+  if (usageError && !usage) {
+    return (
+      <button type="button" className="truncate text-left text-rose-400 hover:underline" title={usageError} onClick={() => void refreshUsage()}>
+        usage unavailable
+      </button>
+    );
+  }
+  if (!usage) return <span>usage…</span>;
+  if (!usage.windows.length) {
+    return (
+      <span className="truncate" title={usage.reason ?? undefined}>
+        {usage.reason ?? "no window reading yet"}
+      </span>
+    );
+  }
+  const a = usage.accounts;
+  const detail = [
+    ...usage.windows.map((w) => `${windowName(w)}: ${Math.round(w.remaining)}% left${w.resetsAt ? `, resets in ${untilText(w.resetsAt)}` : ""}`),
+    `${a.available} of ${a.enabled} account${a.enabled === 1 ? "" : "s"} serving now` +
+      (a.coolingDown ? `, ${a.coolingDown} cooling down` : "") +
+      (a.quotaBlocked ? `, ${a.quotaBlocked} held back by the ${usage.floorPercent}% floor` : ""),
+    ...(usage.plan ? [usage.plan] : []),
+    "click to refresh",
+  ].join("\n");
+  return (
+    <button type="button" className="flex flex-col gap-0.5 text-left" title={detail} onClick={() => void refreshUsage()}>
+      {usage.windows.slice(0, 3).map((w) => {
+        const pct = Math.max(0, Math.min(100, w.remaining));
+        const tone = pct <= usage.floorPercent ? "bg-rose-500" : pct < 25 ? "bg-amber-500" : "bg-emerald-500";
+        return (
+          <span key={w.name} className="flex items-center gap-1.5">
+            <span className="w-11 shrink-0 truncate text-zinc-500">{windowName(w)}</span>
+            <span className="h-1.5 flex-1 overflow-hidden rounded bg-zinc-800">
+              <span className={clsx("block h-full rounded", tone)} style={{ width: `${pct}%` }} />
+            </span>
+            <span className="w-8 shrink-0 text-right tabular-nums text-zinc-400">{Math.round(pct)}%</span>
+            <span className="w-9 shrink-0 truncate text-right text-zinc-600">{w.resetsAt ? untilText(w.resetsAt) : ""}</span>
+          </span>
+        );
+      })}
+    </button>
   );
 }

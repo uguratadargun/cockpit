@@ -5,6 +5,7 @@ import type {
   AskAnswer,
   ClaudeSession,
   Execution,
+  GateUsage,
   Pending,
   PermissionDecision,
   PtyInfo,
@@ -73,6 +74,10 @@ const api = {
     /** The team's workflows, from the mirror on this machine. */
     workflows: (): Promise<Result<WorkflowSummary[]>> => ipcRenderer.invoke(invoke.executionsWorkflows),
     onEvent: (cb: (frame: StreamFrame) => void): Unsubscribe => on(push.executionEvent, cb),
+  },
+  gate: {
+    /** What the pool has left: the 5h and 7d windows, and when each resets. */
+    usage: (): Promise<Result<GateUsage>> => ipcRenderer.invoke(invoke.gateUsage),
   },
   window: {
     focus: (): Promise<void> => ipcRenderer.invoke(invoke.windowFocus),

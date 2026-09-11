@@ -5,6 +5,7 @@ import type {
   AskAnswer,
   ClaudeSession,
   Execution,
+  GateUsage,
   Pending,
   PermissionDecision,
   Result,
@@ -59,6 +60,10 @@ interface CockpitState {
   /** The team's workflows, for starting a run; loaded on first need. */
   workflows: WorkflowSummary[];
   workflowsError: string | null;
+  /** The pool's windows, refreshed every minute while connected. */
+  usage: GateUsage | null;
+  usageError: string | null;
+  usageAt: number;
 
   section: Section;
   selectedSessionId: string | null;
@@ -106,6 +111,7 @@ interface CockpitState {
   loadEvents: (executionId: string) => Promise<void>;
   loadGraph: (workflowId: string) => Promise<void>;
   loadWorkflows: () => Promise<void>;
+  refreshUsage: () => Promise<void>;
   /** Starts a run: a new session in the project, with `/gate:run <workflow> <task>` as its first prompt. */
   startRun: (cwd: string, workflowId: string, task: string) => Promise<Result<{ ptyId: string }>>;
   cancelExecution: (id: string) => Promise<Result>;
@@ -196,6 +202,9 @@ export const useStore = create<CockpitState>((set, get) => ({
   graphErrors: {},
   workflows: [],
   workflowsError: null,
+  usage: null,
+  usageError: null,
+  usageAt: 0,
   section: "sessions",
   selectedSessionId: null,
   selectedPtyId: null,
@@ -262,6 +271,11 @@ export const useStore = create<CockpitState>((set, get) => ({
       selectedPtyId: get().selectedPtyId ?? first?.ptyId ?? null,
       lastCwd: get().lastCwd || sorted[0]?.cwd || "",
     });
+    if (setup.gate.connected) {
+      void get().refreshUsage();
+      // A window reading arrives with every gateway reply, so a minute is plenty; nothing here polls Anthropic.
+      setInterval(() => void get().refreshUsage(), 60_000);
+    }
   },
 
   refreshSetup: async () => {
@@ -357,6 +371,12 @@ export const useStore = create<CockpitState>((set, get) => ({
     const result = await window.cockpit.asks.decide(id, decision);
     if (result.ok) set({ pending: get().pending.filter((p) => p.id !== id) });
     return result;
+  },
+
+  refreshUsage: async () => {
+    const result = await window.cockpit.gate.usage();
+    if (result.ok) set({ usage: result.value, usageError: null, usageAt: Date.now() });
+    else set({ usageError: result.error, usageAt: Date.now() });
   },
 
   refreshExecutions: async () => {

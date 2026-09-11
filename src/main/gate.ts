@@ -2,7 +2,7 @@ import { chmodSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir, hostname } from "node:os";
 import { dirname, join } from "node:path";
 
-import type { Execution, Result, StreamFrame } from "../shared/types";
+import type { Execution, GateUsage, Result, StreamFrame } from "../shared/types";
 
 /**
  * The cockpit's half of gate's `/api/v1`.
@@ -267,6 +267,11 @@ export class GateClient {
 
   async execution(id: string): Promise<{ execution: Execution; steps: unknown[] }> {
     return this.request<{ execution: Execution; steps: unknown[] }>(`/api/v1/executions/${encodeURIComponent(id)}`);
+  }
+
+  /** The pool's windows, the numbers `/usage` used to show before the session joined the gate. */
+  async usage(init: RequestInit = {}): Promise<GateUsage> {
+    return this.request<GateUsage>("/api/v1/usage", init);
   }
 
   /** Asks a run to stop. `ok` when the server took the request; otherwise its reason. */
