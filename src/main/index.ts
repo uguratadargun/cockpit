@@ -50,6 +50,21 @@ const sessionOfPty = new Map<string, string>();
 const ptyOfSession = new Map<string, string>();
 /** What each session's hooks last said. */
 const statusOf = new Map<string, { status: SessionStatus; at: number }>();
+/**
+ * A "working" session whose terminal has printed nothing for this long is
+ * idle: Claude Code redraws its spinner while it thinks, so a quiet terminal
+ * is one at its prompt. Covers a Stop hook that never reached us.
+ */
+const QUIET_MS = 12_000;
+
+function statusFor(sessionId: string | null, live: { alive: boolean; hasOutput: boolean; lastOutputAt: number } | null, now: number): SessionStatus {
+  if (!live?.alive) return "exited";
+  const said = sessionId ? statusOf.get(sessionId) : undefined;
+  const status = said?.status ?? "idle";
+  if (status === "working" && live.hasOutput && now - live.lastOutputAt > QUIET_MS) return "idle";
+  return status;
+}
+
 /** Live events per run, from the stream; what `executions:events` serves after the recorded steps. */
 const liveEvents = new Map<string, WorkflowEvent[]>();
 let executions: Execution[] = [];
@@ -111,7 +126,7 @@ function sessionList(): ClaudeSession[] {
       startedAt: s.startedAt,
       lastActiveAt: Math.max(s.lastActiveAt, live?.lastOutputAt ?? 0, said?.at ?? 0),
       presence: live?.alive ? "live" : "asleep",
-      status: live?.alive ? (said?.status ?? "idle") : "exited",
+      status: statusFor(s.id, live, now),
       run: readRunPointer(s.id),
     });
   }
@@ -129,7 +144,7 @@ function sessionList(): ClaudeSession[] {
       startedAt: now,
       lastActiveAt: p.lastOutputAt || now,
       presence: "live",
-      status: statusOf.get(sid ?? "")?.status ?? "working",
+      status: statusFor(sid ?? null, p, now),
       run: sid ? readRunPointer(sid) : null,
     });
   }
@@ -214,10 +229,12 @@ function onHook(e: SessionHookEvent): void {
       ptys.setSession(e.ptyId, e.sessionId);
     }
   }
+  // A session that has just started is at its prompt, not working; work
+  // begins with the first prompt submitted.
   const status: SessionStatus | null =
-    e.kind === "start" || e.kind === "prompt" || e.kind === "working"
+    e.kind === "prompt" || e.kind === "working"
       ? "working"
-      : e.kind === "idle"
+      : e.kind === "idle" || e.kind === "start"
         ? "idle"
         : e.kind === "waiting"
           ? "waiting"
