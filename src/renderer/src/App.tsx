@@ -79,8 +79,21 @@ function Shell() {
         </ul>
         <div className="mt-auto flex flex-col gap-1 border-t border-zinc-800 px-3 py-2 text-[10px] text-zinc-600">
           {setup?.gate.connected ? (
-            <span className="truncate" title={setup.gate.url ?? undefined}>
-              {setup.gate.person}@{setup.gate.team}
+            <span className="flex items-center gap-1.5">
+              <span className="truncate" title={setup.gate.url ?? undefined}>
+                {setup.gate.person}@{setup.gate.team}
+              </span>
+              <span
+                className={clsx("ml-auto shrink-0", !setup.gate.live && "text-amber-500")}
+                title={
+                  setup.gate.live
+                    ? `gate ${setup.gate.version ?? "?"} — runs update live`
+                    : `gate ${setup.gate.version ?? "?"} has no run stream; the list is refreshed every 10 s. gate 0.34.0 or later updates live.`
+                }
+              >
+                gate {setup.gate.version ?? "?"}
+                {!setup.gate.live && " · polling"}
+              </span>
             </span>
           ) : (
             <span>gate not connected</span>

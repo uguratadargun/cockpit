@@ -108,6 +108,9 @@ export function pluginStatus(env: Record<string, string>): SetupStatus["plugin"]
 }
 
 /** `a` is a newer version than `b`, comparing dotted numbers; anything unparsable is not newer. */
+/** The first gate that serves /api/v1/executions/stream. */
+export const STREAM_SINCE = "0.34.0";
+
 export function isNewer(a: string | null, b: string | null): boolean {
   if (!a || !b) return false;
   const pa = a.split(".").map((x) => Number.parseInt(x, 10));
@@ -221,12 +224,20 @@ export async function setupStatus(env: Record<string, string>): Promise<SetupSta
   const status: SetupStatus = {
     claude: { found: found !== null, version: found?.version ?? null, path: found?.path ?? null },
     plugin,
-    gate: { connected: false, url: conn?.url ?? null, person: null, team: null },
+    gate: { connected: false, url: conn?.url ?? null, person: null, team: null, version: null, live: false },
   };
   if (conn) {
     try {
       const me = await new GateClient(conn).me({ signal: AbortSignal.timeout(8_000) });
-      status.gate = { connected: true, url: conn.url, person: me.person, team: me.team };
+      status.gate = {
+        connected: true,
+        url: conn.url,
+        person: me.person,
+        team: me.team,
+        version: me.version,
+        // The run stream arrived with 0.34.0; an older gate is polled instead.
+        live: !isNewer(STREAM_SINCE, me.version),
+      };
       // The gate's version is its plugin's version: the two are bumped together.
       status.plugin.latest = me.version;
       status.plugin.updateAvailable = plugin.installed && isNewer(me.version, plugin.version);

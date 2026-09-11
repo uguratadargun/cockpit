@@ -253,7 +253,12 @@ export const useStore = create<CockpitState>((set, get) => ({
       });
       window.cockpit.executions.onEvent((frame: StreamFrame) => {
         if (frame.type === "snapshot") {
-          set({ executions: sortExecutions(frame.executions) });
+          // The stream's snapshot carries only running runs and a poll carries
+          // recent ones: either way it is merged, so a finished run stays on
+          // the list until a fresh list says otherwise.
+          const byId = new Map(get().executions.map((e) => [e.id, e]));
+          for (const e of frame.executions) byId.set(e.id, e);
+          set({ executions: sortExecutions([...byId.values()]) });
           return;
         }
         const { executions, events } = get();

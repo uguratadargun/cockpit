@@ -113,12 +113,12 @@ describe("setup", () => {
     assert.deepEqual(s1, {
       claude: { found: true, version: "2.1.266", path: join(bin, "claude") },
       plugin: { installed: false, version: null, latest: null, updateAvailable: false },
-      gate: { connected: false, url: null, person: null, team: null },
+      gate: { connected: false, url: null, person: null, team: null, version: null, live: false },
     });
     process.env.GATE_URL = "http://127.0.0.1:1";
     process.env.GATE_KEY = "gate_x";
     const s2 = await setupStatus(env());
-    assert.deepEqual(s2.gate, { connected: false, url: "http://127.0.0.1:1", person: null, team: null });
+    assert.deepEqual(s2.gate, { connected: false, url: "http://127.0.0.1:1", person: null, team: null, version: null, live: false });
   });
 });
 

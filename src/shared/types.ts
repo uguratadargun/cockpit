@@ -196,7 +196,8 @@ export interface SetupStatus {
   claude: { found: boolean; version: string | null; path: string | null };
   /** `latest` is what the gate serves (its plugin and server share a version); `updateAvailable` when it is newer than what is installed. */
   plugin: { installed: boolean; version: string | null; latest: string | null; updateAvailable: boolean };
-  gate: { connected: boolean; url: string | null; person: string | null; team: string | null };
+  /** `version` is what the gate reports; `live` when it serves the run stream (0.34.0 and later). */
+  gate: { connected: boolean; url: string | null; person: string | null; team: string | null; version: string | null; live: boolean };
 }
 
 export type Result<T = void> = { ok: true; value: T } | { ok: false; error: string };

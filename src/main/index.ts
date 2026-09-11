@@ -368,17 +368,48 @@ function startStream(): void {
       }
     }
     send(push.executionEvent, frame);
-  }, abort.signal);
+  }, abort.signal, {
+    onState: (state) => {
+      streamConnected = state.connected;
+      schedulePoll();
+    },
+  });
+  schedulePoll();
 }
 
+/** Fetches the person's recent runs; when the list changed, the renderer gets it as a snapshot. */
 async function refreshExecutions(): Promise<Execution[]> {
   if (!gate) return executions;
   try {
-    executions = await gate.executions(50);
+    const fresh = await gate.executions(50);
+    const changed =
+      fresh.length !== executions.length ||
+      fresh.some((f, i) => {
+        const e = executions[i];
+        return !e || e.id !== f.id || e.status !== f.status || e.pausedAt !== f.pausedAt || e.stepCount !== f.stepCount;
+      });
+    executions = fresh;
+    if (changed) send(push.executionEvent, { type: "snapshot", at: Date.now(), executions });
   } catch {
     // Offline: the last list stands.
   }
   return executions;
+}
+
+/**
+ * The list is also polled, because the stream is not always there: a gate
+ * older than 0.34.0 has no stream, and a dropped connection may take a while
+ * to come back. Quick while there is no stream, slow while there is one.
+ */
+let streamConnected = false;
+let pollTimer: ReturnType<typeof setTimeout> | null = null;
+function schedulePoll(): void {
+  if (pollTimer) clearTimeout(pollTimer);
+  pollTimer = setTimeout(() => {
+    pollTimer = null;
+    void refreshExecutions().finally(schedulePoll);
+  }, streamConnected ? 60_000 : 10_000);
+  pollTimer.unref();
 }
 
 /** The recorded steps as the events they would have been, then what the stream has added. */
