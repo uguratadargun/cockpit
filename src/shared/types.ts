@@ -159,7 +159,7 @@ export interface WorkflowGraph {
   id: string;
   name: string;
   entry: string;
-  nodes: Array<{ id: string; type: string; agent?: string; label?: string }>;
+  nodes: Array<{ id: string; type: string; agent?: string; label?: string; status?: string }>;
   edges: Array<{ from: string; to: string; label?: string }>;
 }
 

@@ -35,6 +35,7 @@ interface RawNode {
   type?: unknown;
   agent?: unknown;
   label?: unknown;
+  status?: unknown;
   next?: unknown;
   edges?: unknown;
   branches?: unknown;
@@ -73,6 +74,8 @@ export function parseWorkflowGraph(id: string, yamlText: string): WorkflowGraph 
     const label = str(raw.label);
     if (label) node.label = label;
     else if (raw.disabled === true) node.label = "(disabled)";
+    const status = str(raw.status);
+    if (type === "terminal" && status) node.status = status;
     nodes.push(node);
 
     if (type === "parallel") {

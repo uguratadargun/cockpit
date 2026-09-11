@@ -72,18 +72,19 @@ export interface Placed {
 
 export const NODE_W = 180;
 export const NODE_H = 56;
-const GAP_X = 70;
-const GAP_Y = 110;
+export const COLUMN_WIDTH = 250;
+export const ROW_HEIGHT = 110;
 
 export function edgeId(from: string, to: string): string {
-  return `${from}\u0000${to}`;
+  return `${from}->${to}`;
 }
 
 /**
- * The edges that go back up the graph — a reviewer sending work back to the
- * implementer, a give-up loop — found by a depth-first walk from the entry:
- * an edge into a node still on the walk's stack is a loop. Drawn differently,
- * and left out of the layering, so the pipeline reads top-down.
+ * The edges that hand control back to an earlier node — a reviewer sending
+ * work back to the implementer, a give-up loop — found by a depth-first walk:
+ * an edge into a node still on the walk's stack is a loop. Drawn as a return
+ * path under the cards, and left out of the layering, so the pipeline reads
+ * left to right. The same rule gate's dashboard uses.
  */
 export function backEdges(graph: WorkflowGraph): Set<string> {
   const out = new Map<string, string[]>();
@@ -106,85 +107,103 @@ export function backEdges(graph: WorkflowGraph): Set<string> {
 }
 
 /**
- * Top-down layered layout.
+ * Left-to-right layout, as gate's dashboard draws it.
  *
- * Depth is the longest forward path from the entry (loops removed), so a
- * node sits below everything that feeds it; nodes the entry cannot reach go
- * under the deepest layer. Within a layer, nodes are ordered by the average
- * position of their neighbours in the layer above (then below, then above
- * again) so edges cross as little as a few sweeps can manage, and each layer
- * is centred on x = 0.
+ * A node's column is the longest forward path from the entry (loops set
+ * aside). Within a column, the node with the longest road still ahead — the
+ * spine — sits on row 0, so the run's main line reads straight across.
+ * Everything else in the column is a side exit or a detour and goes above
+ * the spine; the space below is for the return paths, drawn from bottom
+ * handle to bottom handle. The one exception is a side node that itself
+ * loops back (clarify → planner): it goes below, where its return path does
+ * not have to cross the spine's card.
  */
 export function layoutGraph(graph: WorkflowGraph): Placed[] {
-  const ids = graph.nodes.map((n) => n.id);
-  const known = new Set(ids);
-  const back = backEdges(graph);
-  const forward = graph.edges.filter((e) => known.has(e.from) && known.has(e.to) && !back.has(edgeId(e.from, e.to)));
-  const out = new Map<string, string[]>();
-  const into = new Map<string, string[]>();
-  for (const id of ids) {
-    out.set(id, []);
-    into.set(id, []);
-  }
-  for (const e of forward) {
-    out.get(e.from)!.push(e.to);
-    into.get(e.to)!.push(e.from);
-  }
+  const byId = new Map(graph.nodes.map((n) => [n.id, n]));
+  const loops = backEdges(graph);
+  const outgoing = new Map<string, string[]>();
+  for (const n of graph.nodes) outgoing.set(n.id, []);
+  for (const e of graph.edges) if (byId.has(e.from) && byId.has(e.to)) outgoing.get(e.from)!.push(e.to);
+  const forward = (id: string) => (outgoing.get(id) ?? []).filter((to) => !loops.has(edgeId(id, to)));
+  const loopsBack = (id: string) => (outgoing.get(id) ?? []).some((to) => loops.has(edgeId(id, to)));
 
-  // Longest path from the entry, in topological order (the graph is a DAG here).
   const depth = new Map<string, number>();
-  const indeg = new Map(ids.map((id) => [id, into.get(id)!.length]));
-  const queue = ids.filter((id) => indeg.get(id) === 0);
-  for (const id of queue) depth.set(id, id === graph.entry ? 0 : 0);
-  while (queue.length) {
-    const cur = queue.shift()!;
-    const d = depth.get(cur) ?? 0;
-    for (const next of out.get(cur)!) {
-      depth.set(next, Math.max(depth.get(next) ?? 0, d + 1));
-      indeg.set(next, indeg.get(next)! - 1);
-      if (indeg.get(next) === 0) queue.push(next);
-    }
-  }
-  let deepest = -1;
-  for (const d of depth.values()) deepest = Math.max(deepest, d);
-  for (const id of ids) if (!depth.has(id)) depth.set(id, deepest + 1);
-
-  const layers: string[][] = [];
-  for (const id of ids) {
-    const d = depth.get(id)!;
-    (layers[d] ??= []).push(id);
-  }
-  for (let d = 0; d < layers.length; d++) layers[d] ??= [];
-
-  // Barycenter sweeps: down, up, down.
-  const index = new Map<string, number>();
-  const reindex = () => layers.forEach((layer) => layer.forEach((id, i) => index.set(id, i)));
-  reindex();
-  const sweep = (dir: 1 | -1) => {
-    const order = dir === 1 ? layers.keys() : [...layers.keys()].reverse();
-    for (const d of order) {
-      const layer = layers[d];
-      if (!layer || layer.length < 2) continue;
-      const neighbours = dir === 1 ? into : out;
-      const key = new Map<string, number>();
-      layer.forEach((id, i) => {
-        const ns = neighbours.get(id)!.filter((n) => depth.get(n) === d - dir);
-        key.set(id, ns.length ? ns.reduce((sum, n) => sum + index.get(n)!, 0) / ns.length : i);
-      });
-      layer.sort((a, b) => key.get(a)! - key.get(b)! || index.get(a)! - index.get(b)!);
-      reindex();
-    }
+  const topo: string[] = [];
+  const seen = new Set<string>();
+  const visit = (id: string) => {
+    if (seen.has(id)) return;
+    seen.add(id);
+    for (const to of forward(id)) visit(to);
+    topo.push(id);
   };
-  sweep(1);
-  sweep(-1);
-  sweep(1);
+  if (byId.has(graph.entry)) visit(graph.entry);
+  topo.reverse();
+  if (byId.has(graph.entry)) depth.set(graph.entry, 0);
+  for (const id of topo) {
+    const d = depth.get(id);
+    if (d === undefined) continue;
+    for (const to of forward(id)) depth.set(to, Math.max(depth.get(to) ?? 0, d + 1));
+  }
+  const order = [...topo];
+  for (const n of graph.nodes) if (!seen.has(n.id)) order.push(n.id);
+  const depthOf = (id: string) => depth.get(id) ?? 0;
+
+  const reach = new Map<string, number>();
+  const reachOf = (id: string): number => {
+    const known = reach.get(id);
+    if (known !== undefined) return known;
+    reach.set(id, 0);
+    let best = 0;
+    for (const to of forward(id)) best = Math.max(best, 1 + reachOf(to));
+    reach.set(id, best);
+    return best;
+  };
+
+  const columns = new Map<number, string[]>();
+  for (const id of order) {
+    const d = depthOf(id);
+    columns.set(d, [...(columns.get(d) ?? []), id]);
+  }
+  const failedExit = (id: string) => {
+    const n = byId.get(id);
+    return n?.type === "terminal" && n.status === "failed";
+  };
+  const ahead = (a: string, b: string) =>
+    reachOf(a) > reachOf(b) || (reachOf(a) === reachOf(b) && !failedExit(a) && failedExit(b));
 
   const placed: Placed[] = [];
-  layers.forEach((layer, d) => {
-    const total = layer.length * NODE_W + (layer.length - 1) * GAP_X;
-    layer.forEach((id, i) => {
-      placed.push({ id, depth: d, x: -total / 2 + i * (NODE_W + GAP_X), y: d * (NODE_H + GAP_Y) });
-    });
-  });
+  for (const [d, ids] of columns) {
+    let spine = ids[0];
+    for (const id of ids) if (ahead(id, spine)) spine = id;
+    let above = 0;
+    let below = 0;
+    for (const id of ids) {
+      let row: number;
+      if (id === spine) row = 0;
+      else if (loopsBack(id)) row = ++below;
+      else row = -++above;
+      placed.push({ id, depth: d, x: d * COLUMN_WIDTH, y: row * ROW_HEIGHT });
+    }
+  }
   return placed;
+}
+
+/**
+ * Forward edges that do not go to the next column over: a shortcut past a
+ * gate, an exit to a terminal placed further along. Drawn straight they
+ * would cut through the cards between, so they get a lane above the cards,
+ * the mirror of what return paths get below.
+ */
+export function skipEdges(graph: WorkflowGraph, placed: Placed[], loops: Set<string>): Set<string> {
+  const pos = new Map(placed.map((p) => [p.id, p]));
+  const out = new Set<string>();
+  for (const e of graph.edges) {
+    const from = pos.get(e.from);
+    const to = pos.get(e.to);
+    const key = edgeId(e.from, e.to);
+    if (!from || !to || loops.has(key)) continue;
+    const dx = to.x - from.x;
+    if (dx < COLUMN_WIDTH * 0.5 || dx > COLUMN_WIDTH * 1.5) out.add(key);
+  }
+  return out;
 }
