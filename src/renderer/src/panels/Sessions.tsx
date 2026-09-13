@@ -1,5 +1,5 @@
 import clsx from "clsx";
-import { FolderOpen, Moon, Plus, X } from "lucide-react";
+import { Cloud, FolderOpen, Moon, Plus, X } from "lucide-react";
 import { useState } from "react";
 
 import type { ClaudeSession } from "@shared/types";
@@ -8,6 +8,7 @@ import { Badge, Pill } from "@/components/Badge";
 import { Button } from "@/components/Button";
 import { PtyTerminalView } from "@/components/PtyTerminalView";
 import { RelativeTime } from "@/components/RelativeTime";
+import { TargetPicker, targetOf, useTargetChoice } from "@/components/TargetPicker";
 import { STATUS_CLASS, STATUS_LABEL, runLine, sessionTitle } from "@/lib/format";
 import { useStore } from "@/store";
 
@@ -24,6 +25,7 @@ export function SessionsList({ className }: { className?: string }) {
   const selectProject = useStore((s) => s.selectProject);
   const setSection = useStore((s) => s.setSection);
   const startSession = useStore((s) => s.startSession);
+  const resolveTarget = useStore((s) => s.resolveTarget);
   const [creating, setCreating] = useState(false);
   const [starting, setStarting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -38,16 +40,24 @@ export function SessionsList({ className }: { className?: string }) {
     if (result && !result.ok) setError(result.error);
   };
 
-  // A project is already chosen above: open claude straight there, no form in the way.
-  // Only "all projects" needs the form, to say which directory a session belongs to.
+  // A project is already chosen above: open claude straight there, no form in the way —
+  // on this machine, or on the gate server when that is the preference and the project's
+  // origin matches a connected repository. "All projects", or a server session with no
+  // matching repository, needs the form to say where.
   const newSession = async () => {
-    if (!selectedProject) {
+    if (!selectedProject || creating) {
       setCreating((c) => !c);
       return;
     }
     setError(null);
     setStarting(true);
-    const result = await startSession(selectedProject);
+    const target = await resolveTarget(selectedProject);
+    if (!target) {
+      setStarting(false);
+      setCreating(true);
+      return;
+    }
+    const result = await startSession(selectedProject, undefined, target);
     setStarting(false);
     if (!result.ok) setError(result.error);
   };
@@ -112,6 +122,11 @@ export function SessionsList({ className }: { className?: string }) {
             >
               <div className="flex items-center gap-1.5">
                 {s.presence === "asleep" && <Moon size={11} className="shrink-0 text-zinc-500" />}
+                {s.location === "remote" && (
+                  <span title={`On the gate server${s.repo ? `, in ${s.repo}` : ""}`} className="shrink-0">
+                    <Cloud size={11} className="text-sky-400" />
+                  </span>
+                )}
                 <span className="truncate text-xs font-medium text-zinc-100" title={s.title ?? s.cwd}>
                   {sessionTitle(s)}
                 </span>
@@ -138,7 +153,7 @@ export function SessionsList({ className }: { className?: string }) {
               )}
               <div className="mt-0.5 flex items-center gap-2 text-[10px] text-zinc-500">
                 <span className="truncate" title={s.cwd}>
-                  {s.cwd}
+                  {s.location === "remote" ? `gate server · ${s.repo ?? "?"}` : s.cwd}
                 </span>
                 <RelativeTime at={s.lastActiveAt} className="ml-auto shrink-0" />
               </div>
@@ -159,13 +174,19 @@ function NewSessionForm({ onDone }: { onDone: () => void }) {
   const [prompt, setPrompt] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [choice, setChoice] = useTargetChoice(cwd);
 
   const start = async () => {
     const dir = cwd.trim();
     if (!dir || busy) return;
+    const target = targetOf(choice);
+    if ("error" in target) {
+      setError(target.error);
+      return;
+    }
     setBusy(true);
     setError(null);
-    const result = await startSession(dir, prompt.trim() || undefined);
+    const result = await startSession(dir, prompt.trim() || undefined, target);
     setBusy(false);
     if (result.ok) onDone();
     else setError(result.error);
@@ -188,6 +209,7 @@ function NewSessionForm({ onDone }: { onDone: () => void }) {
         spellCheck={false}
         className="rounded border border-zinc-700 bg-zinc-950 px-2 py-1 font-mono text-[11px] text-zinc-100 placeholder:text-zinc-600 focus:border-sky-500 focus:outline-none"
       />
+      <TargetPicker choice={choice} onChange={setChoice} />
       <label className="text-[10px] uppercase tracking-wide text-zinc-500">First prompt (optional)</label>
       <input
         value={prompt}

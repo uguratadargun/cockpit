@@ -36,6 +36,9 @@ export const invoke = {
   executionsFileDiff: "executions:file-diff",
   // gate
   gateUsage: "gate:usage",
+  // remote sessions
+  remoteInfo: "remote:info",
+  remoteMatch: "remote:match",
   // window
   windowFocus: "window:focus",
   // update

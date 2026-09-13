@@ -362,15 +362,28 @@ export class PtyManager {
   }
 }
 
+/**
+ * Terminals that are not ptys of this process — the gate server's — answer
+ * the same three calls. The renderer never knows which kind it is typing
+ * into; the router claims the ids that are its own.
+ */
+export interface TerminalRouter {
+  owns(ptyId: string): boolean;
+  write(ptyId: string, data: string): { ok: boolean };
+  resize(ptyId: string, cols: number, rows: number): void;
+  redraw(ptyId: string): void;
+}
+
 /** The pty half of the invoke surface. Session open/start/close live with
  *  whoever owns sessions; these are the four the terminal view itself calls. */
-export function registerPtyIpc(ipcMain: IpcMain, ptys: PtyManager): void {
-  ipcMain.handle(invoke.ptyWrite, (_e, ptyId: string, data: string) => ptys.write(ptyId, data));
+export function registerPtyIpc(ipcMain: IpcMain, ptys: PtyManager, other?: TerminalRouter): void {
+  const routed = (ptyId: string) => (other?.owns(ptyId) ? other : null);
+  ipcMain.handle(invoke.ptyWrite, (_e, ptyId: string, data: string) => (routed(ptyId) ?? ptys).write(ptyId, data));
   ipcMain.handle(invoke.ptyResize, (_e, ptyId: string, cols: number, rows: number) => {
-    ptys.resize(ptyId, cols, rows);
+    (routed(ptyId) ?? ptys).resize(ptyId, cols, rows);
   });
   ipcMain.handle(invoke.ptyRedraw, (_e, ptyId: string) => {
-    ptys.redraw(ptyId);
+    (routed(ptyId) ?? ptys).redraw(ptyId);
   });
   ipcMain.handle(invoke.ptyList, () => ptys.list());
 }

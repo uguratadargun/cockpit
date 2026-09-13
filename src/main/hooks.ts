@@ -401,6 +401,7 @@ export class HookServer {
     const run = readRunPointer(p.session_id, this.home);
     const base = {
       id,
+      location: "local" as const,
       sessionId: p.session_id,
       ptyId: p.pty_id ?? null,
       executionId: run?.executionId ?? null,

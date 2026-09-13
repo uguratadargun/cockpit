@@ -1,4 +1,5 @@
 import { app, BrowserWindow, ipcMain, Menu, Notification, shell } from "electron";
+import { execFile } from "node:child_process";
 import { existsSync, mkdirSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
@@ -11,8 +12,10 @@ import type {
   Execution,
   Pending,
   PermissionDecision,
+  RemoteInfo,
   Result,
   RunPointer,
+  RunTarget,
   SessionStatus,
   StreamFrame,
   WorkflowEvent,
@@ -24,6 +27,7 @@ import { listWorkflows, loadWorkflowGraph } from "./graph";
 import { HookServer, type SessionHookEvent } from "./hooks";
 import { ensureShim, writeSessionSettings } from "./hookShim";
 import { loginShellEnv, PtyManager, registerPtyIpc } from "./pty";
+import { isRemotePtyId, matchRepo, RemoteHub, RepoPaths } from "./remote";
 import { discoverSessions, readRunPointer, watchSessions } from "./sessions";
 import { findClaude, installPlugin, setupStatus, updatePlugin } from "./setup";
 import { initUpdater, installUpdate } from "./updater";
@@ -41,6 +45,11 @@ import { initUpdater, installUpdate } from "./updater";
  *   doing. A session asleep on disk is woken with `claude --resume`.
  * - Runs come from gate's client API on the person's own key: a snapshot of
  *   their unfinished runs, then every event as it happens.
+ * - Remote sessions are `claude` processes on the gate server (RemoteHub):
+ *   their bytes, questions and state arrive on the client API's remote
+ *   stream and merge into the same session list, the same terminals and the
+ *   same Questions and Approvals as the local ones. They are the server's:
+ *   closing this window leaves them running there.
  */
 
 // Ubuntu 24.04+ blocks the unprivileged user namespace Chromium's sandbox wants unless an
@@ -56,6 +65,22 @@ const ptys = new PtyManager();
 const hooks = new HookServer();
 let gate: GateClient | null = null;
 let teamId: string | undefined;
+
+/** The gate server's sessions for this person; its terminals are the `r-` ids. */
+const remote = new RemoteHub(RepoPaths.in(app.getPath("userData")), {
+  sessions: () => sessionsChanged(),
+  pending: () => onPending(allPending()),
+  data: (ptyId, data) => send(push.ptyData(ptyId), data),
+  exit: (ptyId, code) => {
+    send(push.ptyExit(ptyId), code);
+    sessionsChanged();
+  },
+});
+
+/** Every question and permission waiting on the person, from this machine's terminals and the server's. */
+function allPending(): Pending[] {
+  return [...hooks.pending(), ...remote.pendingItems()];
+}
 
 /** Session id ↔ terminal, learned from the SessionStart hook. */
 const sessionOfPty = new Map<string, string>();
@@ -192,6 +217,8 @@ function sessionList(): ClaudeSession[] {
       presence: live?.alive ? "live" : "asleep",
       status: statusFor(s.id, live, now),
       run: readRunPointer(s.id),
+      location: "local",
+      repo: null,
     });
   }
   // A terminal whose session id is not known yet (just started, no hook
@@ -210,8 +237,12 @@ function sessionList(): ClaudeSession[] {
       presence: "live",
       status: statusFor(sid ?? null, p, now),
       run: sid ? readRunPointer(sid) : null,
+      location: "local",
+      repo: null,
     });
   }
+  // The server's sessions: their status is what the server's own hooks said.
+  out.push(...remote.claudeSessions());
   // Live sessions break ties by startedAt, not lastActiveAt: the latter moves on every
   // output chunk, so two sessions both producing output would otherwise swap places
   // every debounce tick as they leapfrogged each other's most-recent timestamp.
@@ -498,6 +529,69 @@ function readCurrentNode(executionId: string): RunPointer | null {
   return null;
 }
 
+// ------------------------------------------------------------------ remote
+
+let remoteInfo: { at: number; info: RemoteInfo } | null = null;
+let remoteRetry: ReturnType<typeof setTimeout> | null = null;
+/** How long an answer from /api/v1/remote is reused: the forms ask on every open. */
+const REMOTE_INFO_TTL_MS = 10_000;
+
+/**
+ * What the gate says about running sessions there, fresh unless asked again
+ * within a few seconds. Following the remote stream starts or stops with the
+ * answer, so a key given the scope later is picked up the next time a form
+ * asks, without a restart.
+ */
+async function readRemoteInfo(force = false): Promise<RemoteInfo> {
+  if (!gate) {
+    remote.connect(null);
+    return { allowed: false, available: false, reason: "not connected to a gate", repos: [] };
+  }
+  if (!force && remoteInfo && Date.now() - remoteInfo.at < REMOTE_INFO_TTL_MS) return remoteInfo.info;
+  const client = gate;
+  try {
+    const info = await client.remoteInfo({ signal: AbortSignal.timeout(10_000) });
+    remoteInfo = { at: Date.now(), info };
+    if (info.allowed && !remote.active) remote.connect(client);
+    else if (!info.allowed && remote.active) remote.connect(null);
+    return info;
+  } catch (e) {
+    // Offline: whatever is followed keeps reconnecting on its own; try the question again later.
+    if (!remote.active) {
+      if (remoteRetry) clearTimeout(remoteRetry);
+      remoteRetry = setTimeout(() => {
+        remoteRetry = null;
+        void readRemoteInfo(true);
+      }, 60_000);
+      remoteRetry.unref();
+    }
+    return { allowed: false, available: false, reason: (e as Error).message, repos: remoteInfo?.info.repos ?? [] };
+  }
+}
+
+/** A fresh client means fresh answers: the stream follows the new key, if it may. */
+function connectRemote(): void {
+  remoteInfo = null;
+  remote.connect(null);
+  void readRemoteInfo(true);
+}
+
+/** `git remote get-url origin` in a directory, or null. */
+function originOf(cwd: string): Promise<string | null> {
+  return new Promise((resolve) => {
+    if (!cwd || !existsSync(cwd)) return resolve(null);
+    execFile("git", ["-C", cwd, "remote", "get-url", "origin"], { env: loginShellEnv(), timeout: 5_000 }, (err, stdout) => {
+      resolve(err ? null : stdout.trim() || null);
+    });
+  });
+}
+
+/** Whether a run is being driven by a session on the gate server. */
+function isRemoteExecution(executionId: string): boolean {
+  const execution = executions.find((e) => e.id === executionId);
+  return remote.sessionForExecution(executionId, execution?.client?.session ?? null) !== null;
+}
+
 /** The directory the run's session is sitting in — gate has no notion of this, only the session's own transcript does. */
 function cwdForExecution(executionId: string): string | null {
   const execution = executions.find((e) => e.id === executionId);
@@ -509,7 +603,12 @@ function cwdForExecution(executionId: string): string | null {
 // --------------------------------------------------------------------- ipc
 
 function registerIpc(): void {
-  registerPtyIpc(ipcMain, ptys);
+  registerPtyIpc(ipcMain, ptys, {
+    owns: isRemotePtyId,
+    write: (ptyId, data) => remote.write(ptyId, data),
+    resize: (ptyId, cols, rows) => remote.resize(ptyId, cols, rows),
+    redraw: (ptyId) => remote.redraw(ptyId),
+  });
 
   ipcMain.handle(invoke.setupStatus, async () => {
     const status = await setupStatus(loginShellEnv());
@@ -528,6 +627,7 @@ function registerIpc(): void {
       connectGate();
       teamId = me.teamId;
       startStream();
+      connectRemote();
       await refreshExecutions();
       return { ok: true, value: await setupStatus(loginShellEnv()) };
     } catch (e) {
@@ -536,25 +636,45 @@ function registerIpc(): void {
   });
 
   ipcMain.handle(invoke.sessionsList, () => sessionList());
-  ipcMain.handle(invoke.sessionsOpen, (_e, sessionId: string): Result<{ ptyId: string }> => {
+  ipcMain.handle(invoke.sessionsOpen, async (_e, sessionId: string): Promise<Result<{ ptyId: string }>> => {
+    // A server session is woken on the server, in the repository it sat in.
+    if (remote.findSession(sessionId)) return remote.resume(sessionId);
     const live = ptyOfSession.get(sessionId);
     if (live && ptys.get(live)?.alive) return { ok: true, value: { ptyId: live } };
     const found = discoverSessions({ limit: 200 }).find((s) => s.id === sessionId);
     return spawnClaude(found?.cwd ?? homedir(), ["--resume", sessionId], sessionId);
   });
-  ipcMain.handle(invoke.sessionsStart, (_e, cwd: string, prompt: string | null): Result<{ ptyId: string }> => {
-    const r = spawnClaude(cwd, [], null);
-    if (r.ok && prompt) typeWhenReady(r.value.ptyId, prompt);
-    return r;
-  });
+  ipcMain.handle(
+    invoke.sessionsStart,
+    async (_e, cwd: string, prompt: string | null, target: RunTarget | null): Promise<Result<{ ptyId: string }>> => {
+      if (target?.location === "remote") {
+        if (!target.repo) return { ok: false, error: "pick the gate repository the session should run in" };
+        if (!remote.active) await readRemoteInfo(true);
+        if (!remote.active) return { ok: false, error: remoteInfo?.info.reason ?? "this key may not run sessions on the gate" };
+        return remote.start(target.repo, cwd, prompt);
+      }
+      const r = spawnClaude(cwd, [], null);
+      if (r.ok && prompt) typeWhenReady(r.value.ptyId, prompt);
+      return r;
+    },
+  );
   ipcMain.handle(invoke.sessionsClose, async (_e, ptyId: string) => {
-    await ptys.kill(ptyId);
+    if (isRemotePtyId(ptyId)) await remote.close(ptyId);
+    else await ptys.kill(ptyId);
     sessionsChanged();
   });
 
-  ipcMain.handle(invoke.asksList, () => hooks.pending());
-  ipcMain.handle(invoke.asksAnswer, (_e, id: string, answer: AskAnswer) => hooks.answer(id, answer));
-  ipcMain.handle(invoke.asksDecide, (_e, id: string, decision: PermissionDecision) => hooks.decide(id, decision));
+  ipcMain.handle(invoke.asksList, () => allPending());
+  ipcMain.handle(invoke.asksAnswer, (_e, id: string, answer: AskAnswer) => (remote.isPending(id) ? remote.answer(id, answer) : hooks.answer(id, answer)));
+  ipcMain.handle(invoke.asksDecide, (_e, id: string, decision: PermissionDecision) =>
+    remote.isPending(id) ? remote.decide(id, decision) : hooks.decide(id, decision),
+  );
+
+  ipcMain.handle(invoke.remoteInfo, () => readRemoteInfo());
+  ipcMain.handle(invoke.remoteMatch, async (_e, cwd: string): Promise<{ repo: string | null; origin: string | null }> => {
+    const [origin, info] = await Promise.all([originOf(String(cwd ?? "")), readRemoteInfo()]);
+    return { origin, repo: matchRepo(origin, info.repos)?.id ?? null };
+  });
 
   ipcMain.handle(invoke.executionsList, () => refreshExecutions());
   ipcMain.handle(invoke.executionsEvents, (_e, id: string) => eventsFor(id));
@@ -565,11 +685,14 @@ function registerIpc(): void {
   ipcMain.handle(invoke.executionsGraph, (_e, workflowId: string) => loadWorkflowGraph(workflowId, teamId));
   ipcMain.handle(invoke.executionsWorkflows, () => listWorkflows(teamId));
   ipcMain.handle(invoke.executionsChangedFiles, async (_e, id: string): Promise<Result<ChangedFile[]>> => {
+    // A run on the gate server changed files there; the server reads its worktree.
+    if (gate && isRemoteExecution(id)) return gate.remoteChanges(id);
     const cwd = cwdForExecution(id);
     if (!cwd) return { ok: false, error: "no working directory known for this run" };
     return changedFilesFor(cwd);
   });
   ipcMain.handle(invoke.executionsFileDiff, async (_e, id: string, file: ChangedFile): Promise<Result<string>> => {
+    if (gate && isRemoteExecution(id)) return gate.remoteFileDiff(id, file);
     const cwd = cwdForExecution(id);
     if (!cwd) return { ok: false, error: "no working directory known for this run" };
     return fileDiffFor(cwd, file);
@@ -616,7 +739,7 @@ app.whenReady().then(async () => {
   );
   registerIpc();
   hooks.onSessionEvent(onHook);
-  hooks.onChange(onPending);
+  hooks.onChange(() => onPending(allPending()));
   await hooks.start(cockpitSockPath(app.getPath("userData")));
   ptys.onExit((ptyId) => {
     const sid = sessionOfPty.get(ptyId);
@@ -638,6 +761,7 @@ app.whenReady().then(async () => {
       // Offline at start: the setup screen says so; the stream reconnects.
     }
     startStream();
+    connectRemote();
     void refreshExecutions();
   }
   win = createWindow();
@@ -645,8 +769,11 @@ app.whenReady().then(async () => {
 });
 
 app.on("window-all-closed", () => {
-  // Terminals die with the window: a cockpit with nothing to show holds nothing.
+  // This machine's terminals die with the window: a cockpit with nothing to
+  // show holds nothing. The server's do not — they are the server's, and a
+  // run there is meant to go on without this window; only the stream stops.
   ptys.killAll(0);
+  remote.connect(null);
   void hooks.stop().finally(() => app.quit());
 });
 

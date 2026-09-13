@@ -35,6 +35,19 @@ node it is on. Answering in the window continues the run in its terminal.
   the one the Team page hands out, and gate's client API shows it the runs you
   started and nothing else — a snapshot of the unfinished ones, then every
   event as it happens, on one connection.
+- **Remote sessions run on the gate server.** A new session or run can go to
+  *This machine* (everything above) or to the *Gate server*: gate starts a
+  real `claude` in a pty on its own host, in one of its connected
+  repositories — picked for you when your project's `origin` matches one's
+  source — and the cockpit shows it like any other session: its terminal in
+  Sessions (marked with a cloud), its questions and approvals in their panels,
+  its run in Executions, the run's changed files read from its worktree on
+  the server. Bytes, questions and state come over one client-API stream;
+  typing is coalesced and sent in order. The session is the server's: closing
+  the window leaves it running, and reopening the cockpit brings back its
+  screen and anything waiting on you. It needs a key with the `remote` scope
+  (ticked on the gate's Team page) and a gate of 0.35.0 or later; without
+  either the option is shown off with the reason.
 
 ## Development
 

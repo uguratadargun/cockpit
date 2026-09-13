@@ -10,7 +10,9 @@ import type {
   Pending,
   PermissionDecision,
   PtyInfo,
+  RemoteInfo,
   Result,
+  RunTarget,
   SetupStatus,
   StreamFrame,
   UpdateStatus,
@@ -48,8 +50,12 @@ const api = {
     list: (): Promise<ClaudeSession[]> => ipcRenderer.invoke(invoke.sessionsList),
     /** Opens a terminal for a session: attaches if live, `claude --resume` if asleep. */
     open: (sessionId: string): Promise<Result<{ ptyId: string }>> => ipcRenderer.invoke(invoke.sessionsOpen, sessionId),
-    /** A fresh `claude` in a directory, optionally with a first prompt typed in (e.g. `/gate:run dev "..."`). */
-    start: (cwd: string, prompt?: string): Promise<Result<{ ptyId: string }>> => ipcRenderer.invoke(invoke.sessionsStart, cwd, prompt ?? null),
+    /**
+     * A fresh `claude` for a project, optionally with a first prompt typed in (e.g. `/gate:run dev "..."`).
+     * `target` says where: this machine in `cwd` (the default), or the gate server in a connected repository.
+     */
+    start: (cwd: string, prompt?: string, target?: RunTarget): Promise<Result<{ ptyId: string }>> =>
+      ipcRenderer.invoke(invoke.sessionsStart, cwd, prompt ?? null, target ?? null),
     close: (ptyId: string): Promise<void> => ipcRenderer.invoke(invoke.sessionsClose, ptyId),
     onChange: (cb: (sessions: ClaudeSession[]) => void): Unsubscribe => on(push.sessionsChanged, cb),
   },
@@ -83,6 +89,12 @@ const api = {
   gate: {
     /** What the pool has left: the 5h and 7d windows, and when each resets. */
     usage: (): Promise<Result<GateUsage>> => ipcRenderer.invoke(invoke.gateUsage),
+  },
+  remote: {
+    /** Whether this key may run sessions on the gate server, whether it can, and in which repositories. */
+    info: (): Promise<RemoteInfo> => ipcRenderer.invoke(invoke.remoteInfo),
+    /** The connected repository matching a local project's `origin`, when there is one. */
+    match: (cwd: string): Promise<{ repo: string | null; origin: string | null }> => ipcRenderer.invoke(invoke.remoteMatch, cwd),
   },
   window: {
     focus: (): Promise<void> => ipcRenderer.invoke(invoke.windowFocus),

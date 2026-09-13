@@ -1,3 +1,5 @@
+import { Cloud } from "lucide-react";
+
 import { RelativeTime } from "@/components/RelativeTime";
 import { basename, sessionTitle } from "@/lib/format";
 import { useStore } from "@/store";
@@ -17,6 +19,11 @@ export function AskHeader({ item, headline }: { item: Pending; headline?: string
         <RelativeTime at={item.askedAt} className="ml-auto shrink-0 text-[11px] text-zinc-500" />
       </div>
       <div className="flex flex-wrap items-center gap-x-2 text-[11px] text-zinc-400">
+        {item.location === "remote" && (
+          <span className="flex shrink-0 items-center gap-1 text-sky-300/80" title="This session runs on the gate server">
+            <Cloud size={10} /> gate server
+          </span>
+        )}
         {headline && <span className="truncate">{title}</span>}
         {run && <span className="truncate text-amber-300/80">{run}</span>}
         <span className="truncate text-zinc-600" title={item.cwd}>

@@ -10,7 +10,10 @@ import type {
   GateUsage,
   Pending,
   PermissionDecision,
+  RemoteInfo,
   Result,
+  RunTarget,
+  SessionLocation,
   SetupStatus,
   StreamFrame,
   UpdateStatus,
@@ -41,6 +44,24 @@ export function sectionOf(p: Pending): Section {
   return p.kind === "question" ? "questions" : "approvals";
 }
 
+/** Whether a new session may go to the gate server right now. */
+export function remoteUsable(info: RemoteInfo | null): boolean {
+  return !!info && info.allowed && info.available;
+}
+
+/** Why the gate server option is off, in words for its tooltip; null when it is on. */
+export function remoteBlockReason(info: RemoteInfo | null): string | null {
+  if (!info) return "checking the gate…";
+  if (!info.allowed) {
+    return info.reason && /older than/.test(info.reason)
+      ? info.reason
+      : "your key does not have the remote scope — ask for a key with it on the gate's Team page";
+  }
+  if (!info.available) return info.reason ?? "the gate server cannot run sessions";
+  if (!info.repos.length) return "the gate has no connected repositories";
+  return null;
+}
+
 export function setupNeeded(status: SetupStatus | null): boolean {
   if (!status) return false;
   return !status.claude.found || !status.plugin.installed || !status.gate.connected;
@@ -69,6 +90,10 @@ interface CockpitState {
   usageAt: number;
   /** A newer release than this one, once the main process's periodic check finds it. */
   update: UpdateStatus | null;
+  /** Whether sessions may run on the gate server, and in which repositories; null until asked. */
+  remote: RemoteInfo | null;
+  /** Where new sessions and runs go unless a form says otherwise; kept across launches. */
+  runTarget: SessionLocation;
 
   section: Section;
   selectedSessionId: string | null;
@@ -106,9 +131,20 @@ interface CockpitState {
   /** Takes a project off the list: unpins it, and hides it until something new happens there. */
   removeProject: (path: string) => void;
 
+  loadRemote: () => Promise<RemoteInfo>;
+  setRunTarget: (location: SessionLocation) => void;
+  /**
+   * Where a session for this project goes under the saved preference: this
+   * machine, or the gate repository its origin matches. Null when the
+   * preference is the server and no connected repository matches — the
+   * caller asks the person to pick one.
+   */
+  resolveTarget: (cwd: string) => Promise<RunTarget | null>;
+
   setSection: (section: Section) => void;
   selectSession: (session: ClaudeSession) => Promise<Result<{ ptyId: string }> | null>;
-  startSession: (cwd: string, prompt?: string) => Promise<Result<{ ptyId: string }>>;
+  /** Without a target, the saved preference decides (see resolveTarget). */
+  startSession: (cwd: string, prompt?: string, target?: RunTarget) => Promise<Result<{ ptyId: string }>>;
   closeSession: (ptyId: string) => Promise<void>;
 
   answerAsk: (id: string, answer: AskAnswer) => Promise<Result>;
@@ -121,7 +157,7 @@ interface CockpitState {
   loadWorkflows: () => Promise<void>;
   refreshUsage: () => Promise<void>;
   /** Starts a run: a new session in the project, with `/gate:run <workflow> <task>` as its first prompt. */
-  startRun: (cwd: string, workflowId: string, task: string) => Promise<Result<{ ptyId: string }>>;
+  startRun: (cwd: string, workflowId: string, task: string, target?: RunTarget) => Promise<Result<{ ptyId: string }>>;
   cancelExecution: (id: string) => Promise<Result>;
   /** Windows/Linux: installs the downloaded update and restarts. macOS: opens the release page. */
   installUpdate: () => Promise<void>;
@@ -137,6 +173,7 @@ function applyTheme(theme: Theme): void {
   document.documentElement.classList.toggle("light", theme === "light");
   setTerminalTheme(theme);
 }
+const RUN_TARGET_KEY = "cockpit.runTarget";
 const PROJECT_KEY = "cockpit.selectedProject";
 const PINNED_KEY = "cockpit.pinnedProjects";
 const HIDDEN_KEY = "cockpit.hiddenProjects";
@@ -229,6 +266,8 @@ export const useStore = create<CockpitState>((set, get) => ({
   usageError: null,
   usageAt: 0,
   update: null,
+  remote: null,
+  runTarget: readJson<SessionLocation>(RUN_TARGET_KEY, "local") === "remote" ? "remote" : "local",
   section: "sessions",
   selectedSessionId: null,
   selectedPtyId: null,
@@ -314,6 +353,7 @@ export const useStore = create<CockpitState>((set, get) => ({
       lastCwd: get().lastCwd || sorted[0]?.cwd || "",
     });
     if (setup.gate.connected) {
+      void get().loadRemote();
       void get().refreshUsage();
       // A window reading arrives with every gateway reply, so a minute is plenty; nothing here polls Anthropic.
       setInterval(() => void get().refreshUsage(), 60_000);
@@ -385,6 +425,33 @@ export const useStore = create<CockpitState>((set, get) => ({
     return result;
   },
 
+  loadRemote: async () => {
+    try {
+      const remote = await window.cockpit.remote.info();
+      set({ remote });
+      return remote;
+    } catch (e) {
+      // A main process older than this renderer has no handler for the call.
+      const remote = { allowed: false, available: false, reason: (e as Error).message, repos: [] };
+      set({ remote });
+      return remote;
+    }
+  },
+
+  setRunTarget: (location) => {
+    writeJson(RUN_TARGET_KEY, location);
+    set({ runTarget: location });
+  },
+
+  resolveTarget: async (cwd) => {
+    if (get().runTarget !== "remote") return { location: "local" };
+    const info = await get().loadRemote();
+    // A preference the key can no longer honour falls back to this machine rather than stopping the person.
+    if (!remoteUsable(info)) return { location: "local" };
+    const match = await window.cockpit.remote.match(cwd);
+    return match.repo ? { location: "remote", repo: match.repo } : null;
+  },
+
   setSection: (section) => set({ section }),
 
   selectSession: async (session) => {
@@ -395,8 +462,12 @@ export const useStore = create<CockpitState>((set, get) => ({
     return result;
   },
 
-  startSession: async (cwd, prompt) => {
-    const result = await window.cockpit.sessions.start(cwd, prompt);
+  startSession: async (cwd, prompt, target) => {
+    const where = target ?? (await get().resolveTarget(cwd));
+    if (!where) {
+      return { ok: false, error: "no gate repository matches this project's origin — pick the repository in the New session form" };
+    }
+    const result = await window.cockpit.sessions.start(cwd, prompt, where);
     if (result.ok) {
       writeLastCwd(cwd);
       set({ section: "sessions", lastCwd: cwd, selectedPtyId: result.value.ptyId, selectedSessionId: null });
@@ -469,11 +540,11 @@ export const useStore = create<CockpitState>((set, get) => ({
     }
   },
 
-  startRun: async (cwd, workflowId, task) => {
+  startRun: async (cwd, workflowId, task, target) => {
     // One line: a newline would submit the prompt early in the terminal.
     const brief = task.replace(/\s*\n\s*/g, " ").trim();
     const prompt = brief ? `/gate:run ${workflowId} ${brief}` : `/gate:run ${workflowId}`;
-    return get().startSession(cwd, prompt);
+    return get().startSession(cwd, prompt, target);
   },
 
   cancelExecution: async (id) => {

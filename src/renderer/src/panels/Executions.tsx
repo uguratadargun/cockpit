@@ -9,6 +9,7 @@ import type { ChangedFile, Execution, WorkflowEvent } from "@shared/types";
 import { Pill } from "@/components/Badge";
 import { Button } from "@/components/Button";
 import { RelativeTime } from "@/components/RelativeTime";
+import { TargetPicker, targetOf, useTargetChoice } from "@/components/TargetPicker";
 import { clockTime, durationMs, shortId } from "@/lib/format";
 import { NODE_H, NODE_W, backEdges, deriveRunView, edgeId, edgeKey, layoutGraph, nodeState, skipEdges, type NodeState } from "@/lib/graph";
 import { Empty } from "@/panels/Questions";
@@ -336,6 +337,7 @@ function NewRunForm({ onDone }: { onDone: () => void }) {
   const [task, setTask] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [choice, setChoice] = useTargetChoice(cwd);
 
   useEffect(() => {
     if (!workflows.length) void loadWorkflows();
@@ -355,9 +357,14 @@ function NewRunForm({ onDone }: { onDone: () => void }) {
       setError("say what the run should do");
       return;
     }
+    const target = targetOf(choice);
+    if ("error" in target) {
+      setError(target.error);
+      return;
+    }
     setBusy(true);
     setError(null);
-    const result = await startRun(dir, workflowId, task);
+    const result = await startRun(dir, workflowId, task, target);
     setBusy(false);
     if (result.ok) onDone();
     else setError(result.error);
@@ -387,6 +394,7 @@ function NewRunForm({ onDone }: { onDone: () => void }) {
       {(!known || projects.length === 0) && (
         <input value={cwd} onChange={(e) => setCwd(e.target.value)} placeholder="/path/to/repo" spellCheck={false} className={clsx(field, "font-mono")} />
       )}
+      <TargetPicker choice={choice} onChange={setChoice} />
       <label className="text-[10px] uppercase tracking-wide text-zinc-500">Workflow</label>
       {workflowsError ? (
         <div className="text-[11px] text-rose-400">{workflowsError}</div>

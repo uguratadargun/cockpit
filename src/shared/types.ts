@@ -13,6 +13,14 @@
 export type SessionPresence = "live" | "asleep";
 
 /**
+ * Where a session runs: `local` is a `claude` in a pty on this machine;
+ * `remote` is a `claude` in a pty on the gate server, started by gate in one
+ * of its connected repositories, whose bytes and questions come here over the
+ * client API. The window treats both alike; only the plumbing differs.
+ */
+export type SessionLocation = "local" | "remote";
+
+/**
  * What the session is doing, as its hooks report it. `waiting` is a question
  * out (ours or the TUI's own idle prompt), `blocked` a permission prompt.
  */
@@ -41,7 +49,35 @@ export interface ClaudeSession {
   presence: SessionPresence;
   status: SessionStatus;
   run: RunPointer | null;
+  location: SessionLocation;
+  /** The gate-connected repository a remote session sits in; null for a local one. */
+  repo: string | null;
 }
+
+// ------------------------------------------------------------------ remote
+
+/** A repository connected to the gate: where a remote session can run. */
+export interface RemoteRepo {
+  id: string;
+  name: string;
+  /** What it was connected from: a git URL, or a path on the server. */
+  source: string;
+  status: "new" | "installing" | "ready" | "failed";
+}
+
+/** What the gate says about running sessions on it, for this person's key. */
+export interface RemoteInfo {
+  /** The key carries the `remote` scope. */
+  allowed: boolean;
+  /** The server can host terminals at all (node-pty and claude are there). */
+  available: boolean;
+  /** Why not, when it cannot. */
+  reason: string | null;
+  repos: RemoteRepo[];
+}
+
+/** Where a new session or run should go. */
+export type RunTarget = { location: "local" } | { location: "remote"; repo: string };
 
 // ------------------------------------------------------- questions/approvals
 
@@ -67,6 +103,7 @@ export interface Question {
 export interface PendingAsk {
   id: string;
   kind: "question" | "approval";
+  location: SessionLocation;
   sessionId: string;
   ptyId: string | null;
   executionId: string | null;
@@ -88,6 +125,7 @@ export interface AskAnswer {
 export interface PendingPermission {
   id: string;
   kind: "permission";
+  location: SessionLocation;
   sessionId: string;
   ptyId: string | null;
   executionId: string | null;

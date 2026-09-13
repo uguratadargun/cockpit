@@ -2,7 +2,20 @@ import { chmodSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir, hostname } from "node:os";
 import { dirname, join } from "node:path";
 
-import type { Execution, GateUsage, Result, StreamFrame } from "../shared/types";
+import type {
+  AskAnswer,
+  ChangedFile,
+  Execution,
+  GateUsage,
+  PendingAsk,
+  PendingPermission,
+  PermissionDecision,
+  RemoteInfo,
+  Result,
+  RunPointer,
+  SessionStatus,
+  StreamFrame,
+} from "../shared/types";
 
 /**
  * The cockpit's half of gate's `/api/v1`.
@@ -173,6 +186,51 @@ interface MeResponse {
   server?: { version: string; minClientVersion: string };
 }
 
+// ------------------------------------------------------------------ remote
+
+/**
+ * A session on the gate server, as `/api/v1/remote/sessions` lists it.
+ *
+ * The same words as a local session, with two differences the wire has to
+ * carry: the terminal is the server's `handle` (null while asleep), and `cwd`
+ * is a path on the server, which means nothing on this machine.
+ */
+export interface RemoteSession {
+  /** Claude Code's session id once a hook named it; `remote:<handle>` before. */
+  id: string;
+  handle: string | null;
+  repo: string | null;
+  cwd: string;
+  title: string | null;
+  startedAt: number;
+  lastActiveAt: number;
+  presence: "live" | "asleep";
+  status: SessionStatus;
+  run: RunPointer | null;
+}
+
+type WithoutTerminal<T> = Omit<T, "ptyId" | "location"> & { handle: string | null; repo: string | null };
+
+/** A question or permission held on the server: a local Pending with the server's terminal handle in place of a pty. */
+export type RemotePending = WithoutTerminal<PendingAsk> | WithoutTerminal<PendingPermission>;
+
+/** One frame of `/api/v1/remote/stream`. */
+export type RemoteFrame =
+  | { type: "hello"; at: number; sessions: RemoteSession[]; pending: RemotePending[] }
+  | { type: "screen"; handle: string; data: string }
+  | { type: "sessions"; at: number; sessions: RemoteSession[] }
+  | { type: "pending"; at: number; pending: RemotePending[] }
+  | { type: "data"; handle: string; data: string }
+  | { type: "exit"; handle: string; code: number };
+
+/** What a gate that predates remote sessions is taken to say. */
+export const REMOTE_UNSUPPORTED: RemoteInfo = {
+  allowed: false,
+  available: false,
+  reason: "this gate is older than 0.35.0 and cannot run sessions",
+  repos: [],
+};
+
 export interface StreamOptions {
   /** Told when the stream connects and when it drops (with why). */
   onState?: (state: { connected: boolean; error?: string }) => void;
@@ -297,6 +355,127 @@ export class GateClient {
    * the server's `: hb` comments keep the socket warm and are skipped here.
    */
   stream(onFrame: (f: StreamFrame) => void, signal: AbortSignal, opts: StreamOptions = {}): void {
+    this.follow<StreamFrame>("/api/v1/executions/stream", onFrame, signal, opts);
+  }
+
+  // ---------------------------------------------------------------- remote
+
+  /**
+   * Whether this key may run sessions on the gate, whether the gate can host
+   * them, and the repositories it can host them in. A gate from before remote
+   * sessions has no such route; its 404 is read as "cannot", not as a failure.
+   */
+  async remoteInfo(init: RequestInit = {}): Promise<RemoteInfo> {
+    try {
+      const body = await this.request<Partial<RemoteInfo>>("/api/v1/remote", init);
+      return {
+        allowed: body.allowed === true,
+        available: body.available === true,
+        reason: typeof body.reason === "string" ? body.reason : null,
+        repos: Array.isArray(body.repos) ? body.repos : [],
+      };
+    } catch (e) {
+      if (e instanceof GateApiError && e.status === 404 && e.code !== "NOT_A_GATE") return { ...REMOTE_UNSUPPORTED };
+      throw e;
+    }
+  }
+
+  async remoteSessions(): Promise<RemoteSession[]> {
+    const body = await this.request<{ sessions: RemoteSession[] }>("/api/v1/remote/sessions");
+    return body.sessions ?? [];
+  }
+
+  /** Starts `claude` on the server in a connected repository; `prompt` is typed in once the TUI is ready. */
+  async remoteStart(opts: { repo: string; prompt?: string; cols?: number; rows?: number }): Promise<RemoteSession> {
+    const body = await this.request<{ session: RemoteSession }>("/api/v1/remote/sessions", { method: "POST", body: JSON.stringify(opts) });
+    return body.session;
+  }
+
+  /** Wakes an asleep server session with `claude --resume`. */
+  async remoteResume(sessionId: string, size: { cols?: number; rows?: number } = {}): Promise<RemoteSession> {
+    const body = await this.request<{ session: RemoteSession }>("/api/v1/remote/sessions", {
+      method: "POST",
+      body: JSON.stringify({ resume: sessionId, ...size }),
+    });
+    return body.session;
+  }
+
+  private terminalPath(handle: string, action?: string): string {
+    return `/api/v1/remote/terminals/${encodeURIComponent(handle)}${action ? `/${action}` : ""}`;
+  }
+
+  async remoteInput(handle: string, data: string): Promise<void> {
+    await this.request(this.terminalPath(handle, "input"), { method: "POST", body: JSON.stringify({ data }) });
+  }
+
+  async remoteResize(handle: string, cols: number, rows: number): Promise<void> {
+    await this.request(this.terminalPath(handle, "resize"), { method: "POST", body: JSON.stringify({ cols, rows }) });
+  }
+
+  async remoteRedraw(handle: string): Promise<void> {
+    await this.request(this.terminalPath(handle, "redraw"), { method: "POST", body: "{}" });
+  }
+
+  /** Ends the server's terminal. Its transcript stays, so the session can be resumed. */
+  async remoteClose(handle: string): Promise<void> {
+    await this.request(this.terminalPath(handle), { method: "DELETE" });
+  }
+
+  async remotePending(): Promise<RemotePending[]> {
+    const body = await this.request<{ pending: RemotePending[] }>("/api/v1/remote/asks");
+    return body.pending ?? [];
+  }
+
+  async remoteAnswer(id: string, answer: AskAnswer): Promise<Result> {
+    return this.settleRemote(id, { answer });
+  }
+
+  async remoteDecide(id: string, decision: PermissionDecision): Promise<Result> {
+    return this.settleRemote(id, { decision });
+  }
+
+  private async settleRemote(id: string, body: unknown): Promise<Result> {
+    try {
+      await this.request(`/api/v1/remote/asks/${encodeURIComponent(id)}`, { method: "POST", body: JSON.stringify(body) });
+      return { ok: true, value: undefined };
+    } catch (e) {
+      return { ok: false, error: errorMessage(e) };
+    }
+  }
+
+  /** The files a server-side run changed, read in its worktree there. */
+  async remoteChanges(executionId: string): Promise<Result<ChangedFile[]>> {
+    try {
+      const body = await this.request<{ files: ChangedFile[] }>(`/api/v1/remote/executions/${encodeURIComponent(executionId)}/changes`);
+      return { ok: true, value: body.files ?? [] };
+    } catch (e) {
+      return { ok: false, error: errorMessage(e) };
+    }
+  }
+
+  async remoteFileDiff(executionId: string, file: ChangedFile): Promise<Result<string>> {
+    try {
+      const body = await this.request<{ diff: string }>(`/api/v1/remote/executions/${encodeURIComponent(executionId)}/diff`, {
+        method: "POST",
+        body: JSON.stringify({ file }),
+      });
+      return { ok: true, value: body.diff ?? "" };
+    } catch (e) {
+      return { ok: false, error: errorMessage(e) };
+    }
+  }
+
+  /** Follows /api/v1/remote/stream: a hello, each live terminal's screen, then every change and every byte. */
+  remoteStream(onFrame: (f: RemoteFrame) => void, signal: AbortSignal, opts: StreamOptions = {}): void {
+    this.follow<RemoteFrame>("/api/v1/remote/stream", onFrame, signal, opts);
+  }
+
+  /**
+   * One server-sent-events connection, kept open: `data:` lines gathered into
+   * frames, comments skipped, reconnected with backoff when it drops. Both
+   * the run stream and the remote stream are this.
+   */
+  private follow<T>(path: string, onFrame: (f: T) => void, signal: AbortSignal, opts: StreamOptions): void {
     const min = Math.max(1, opts.minBackoffMs ?? 1_000);
     const max = Math.max(min, opts.maxBackoffMs ?? 30_000);
     let backoff = min;
@@ -304,7 +483,7 @@ export class GateClient {
       while (!signal.aborted) {
         let error: string | null = null;
         try {
-          const res = await fetch(`${this.c.url}/api/v1/executions/stream`, {
+          const res = await fetch(`${this.c.url}${path}`, {
             headers: this.headers({ accept: "text/event-stream" }),
             signal,
           });
@@ -328,9 +507,9 @@ export class GateClient {
             if (!data.length) return;
             const text = data.join("\n");
             data = [];
-            let frame: StreamFrame;
+            let frame: T;
             try {
-              frame = JSON.parse(text) as StreamFrame;
+              frame = JSON.parse(text) as T;
             } catch {
               return;
             }
