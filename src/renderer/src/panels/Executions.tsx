@@ -1,9 +1,10 @@
 import { BaseEdge, Background, EdgeLabelRenderer, getBezierPath, getSmoothStepPath, Handle, MarkerType, Panel, Position, ReactFlow, type Edge, type EdgeProps, type Node, type NodeProps } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
 import clsx from "clsx";
-import { ArrowRightLeft, ChevronDown, ChevronRight, FileMinus, FilePen, FilePlus, GitCompare, Pause, Play, RefreshCw, Square, Workflow } from "lucide-react";
+import { ArrowRightLeft, ChevronDown, ChevronRight, FileMinus, FilePen, FilePlus, GitCompare, Pause, Play, RefreshCw, Square, Tag, Upload, Workflow } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 
+import { publicationOf, shortCommit } from "@shared/execution";
 import type { ChangedFile, Execution, WorkflowEvent } from "@shared/types";
 
 import { Pill } from "@/components/Badge";
@@ -58,6 +59,7 @@ export function Executions() {
                 <div className="mt-0.5 flex items-center gap-2 text-[10px] text-zinc-500">
                   <span className="font-mono">{shortId(e.id)}</span>
                   {e.client?.repo && <span className="truncate">{e.client.repo}{e.client.branch ? `@${e.client.branch}` : ""}</span>}
+                  <PublishedMark execution={e} compact />
                   <RelativeTime at={e.startedAt} className="ml-auto shrink-0" />
                 </div>
               </li>
@@ -67,6 +69,39 @@ export function Executions() {
       </aside>
       <ExecutionDetail id={selectedId} />
     </section>
+  );
+}
+
+/**
+ * Where a finished run's branch went, or why it did not: gate pushes the
+ * branch as the worktree is released and records the outcome on the run. In
+ * a list row only the mark; in the header the ref, the commit and the time.
+ * Nothing at all for a run whose repository publishes nowhere.
+ */
+function PublishedMark({ execution, compact = false }: { execution: Execution; compact?: boolean }) {
+  const publication = publicationOf(execution);
+  if (!publication) return null;
+  if (publication.kind === "failed") {
+    return (
+      <span className={clsx("inline-flex shrink-0 items-center gap-1 text-rose-400", compact ? "text-[10px]" : "text-[11px]")} title={`not published: ${publication.error}`}>
+        <Upload size={10} /> {compact ? "not pushed" : `not published: ${publication.error}`}
+      </span>
+    );
+  }
+  const title = `pushed ${publication.ref} at ${shortCommit(publication.commit)}`;
+  if (compact) {
+    return (
+      <span className="inline-flex shrink-0 items-center gap-1 text-emerald-400/80" title={title}>
+        <Upload size={10} /> pushed
+      </span>
+    );
+  }
+  return (
+    <span className="inline-flex items-center gap-1 truncate text-[11px] text-emerald-400/90" title={title}>
+      <Upload size={10} /> pushed <span className="truncate font-mono">{publication.ref}</span>
+      <span className="font-mono text-zinc-500">{shortCommit(publication.commit)}</span>
+      {publication.at !== null && <RelativeTime at={publication.at} className="text-zinc-500" />}
+    </span>
   );
 }
 
@@ -128,6 +163,12 @@ function ExecutionDetail({ id }: { id: string | null }) {
             {execution.error.code}: {execution.error.message}
           </span>
         )}
+        {execution.taskId && (
+          <span className="inline-flex items-center gap-1 font-mono text-[10px] text-zinc-500" title={`serves task ${execution.taskId}`}>
+            <Tag size={10} /> {shortId(execution.taskId)}
+          </span>
+        )}
+        <PublishedMark execution={execution} />
         {execution.status === "running" && (
           <Button variant="danger" size="sm" className="ml-auto" disabled={stopping} onClick={() => void stop()}>
             <Square size={10} /> {stopping ? "Stopping…" : "Stop"}

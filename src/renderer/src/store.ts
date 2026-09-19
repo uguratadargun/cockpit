@@ -250,6 +250,9 @@ function applyFrame(executions: Execution[], frame: WorkflowEvent): Execution[] 
 
 let subscribed = false;
 
+/** How long after a run ends to read the list again for its publication. */
+const PUBLICATION_REFRESH_MS = [6_000, 30_000];
+
 export const useStore = create<CockpitState>((set, get) => ({
   ready: false,
   setup: null,
@@ -328,6 +331,14 @@ export const useStore = create<CockpitState>((set, get) => ({
         });
         if (frame.type === "workflow.started" && !executions.some((e) => e.id === frame.executionId)) {
           void get().refreshExecutions();
+        }
+        // The run's last word is not the record's: gate pushes the branch as
+        // the worktree is released, after `workflow.completed`, and writes
+        // where it went on the run rather than on the stream. Read the list
+        // again once the push has had time to happen, and once more for a
+        // slow remote, so the row says "pushed" without a reload.
+        if (frame.type === "workflow.completed" || frame.type === "workflow.failed") {
+          for (const delay of PUBLICATION_REFRESH_MS) setTimeout(() => void get().refreshExecutions(), delay);
         }
       });
       window.cockpit.update.onStatus((update) => set({ update }));

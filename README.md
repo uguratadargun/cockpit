@@ -34,7 +34,12 @@ node it is on. Answering in the window continues the run in its terminal.
 - **Runs are yours.** The app authenticates with your own `gatec_…` token,
   the one the Team page hands out, and gate's client API shows it the runs you
   started and nothing else — a snapshot of the unfinished ones, then every
-  event as it happens, on one connection.
+  event as it happens, on one connection. A finished run says where its
+  branch went: gate pushes it as the worktree is released and the row reads
+  *pushed*, with the ref and commit in the run's header, or why the push
+  failed. The usage bars follow gate's own reading of its windows: a model's
+  weekly window (Fable, Opus, Sonnet) running out blocks that model alone, so
+  it is drawn low, never as the pool being held back by the floor.
 - **Remote sessions run on the gate server.** A new session or run can go to
   *This machine* (everything above) or to the *Gate server*: gate starts a
   real `claude` in a pty on its own host, in one of its connected

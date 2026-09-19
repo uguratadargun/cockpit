@@ -2,6 +2,8 @@ import clsx from "clsx";
 import { FolderOpen, MessageCircleQuestion, Moon, ShieldCheck, Sun, Terminal, Workflow, type LucideIcon } from "lucide-react";
 import { useEffect, useState, type CSSProperties } from "react";
 
+import { isModelScopedWindow } from "@shared/execution";
+
 import { Badge } from "@/components/Badge";
 import { Approvals } from "@/panels/Approvals";
 import { Executions } from "@/panels/Executions";
@@ -271,7 +273,8 @@ function UsageLine() {
     ...usage.windows.map((w) => `${windowName(w)}: ${Math.round(w.remaining)}% left${w.resetsAt ? `, resets in ${untilText(w.resetsAt)}` : ""}`),
     `${a.available} of ${a.enabled} account${a.enabled === 1 ? "" : "s"} serving now` +
       (a.coolingDown ? `, ${a.coolingDown} cooling down` : "") +
-      (a.quotaBlocked ? `, ${a.quotaBlocked} held back by the ${usage.floorPercent}% floor` : ""),
+      (a.quotaBlocked ? `, ${a.quotaBlocked} held back by the ${usage.floorPercent}% floor` : "") +
+      (a.modelBlocked ? `, ${a.modelBlocked} out of one model's week` : ""),
     ...(usage.plan ? [usage.plan] : []),
     "click to refresh",
   ].join("\n");
@@ -279,7 +282,11 @@ function UsageLine() {
     <button type="button" className="flex flex-col gap-0.5 text-left" title={detail} onClick={() => void refreshUsage()}>
       {usage.windows.slice(0, 3).map((w) => {
         const pct = Math.max(0, Math.min(100, w.remaining));
-        const tone = pct <= usage.floorPercent ? "bg-rose-500" : pct < 25 ? "bg-amber-500" : "bg-emerald-500";
+        // The floor holds a login back on its account-wide windows only; a
+        // model's own week under it blocks that model, not the account, so
+        // it is drawn low, not as the pool being held back.
+        const underFloor = pct <= usage.floorPercent && !isModelScopedWindow(w.name);
+        const tone = underFloor ? "bg-rose-500" : pct < 25 ? "bg-amber-500" : "bg-emerald-500";
         return (
           <span key={w.name} className="flex items-center gap-1.5">
             <span className="w-11 shrink-0 truncate text-zinc-500">{windowName(w)}</span>

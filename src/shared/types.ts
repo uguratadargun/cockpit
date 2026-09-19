@@ -174,6 +174,18 @@ export interface Execution {
   driver: "engine" | "session";
   client: { host: string | null; repo: string | null; branch: string | null; session: string | null } | null;
   stepCount: number;
+  /** The cross-team task this run serves, when it names one (gate 0.37.0+). */
+  taskId?: string | null;
+  /**
+   * Where the run's branch went when it ended (gate 0.37.0+): the ref and the
+   * commit that were pushed, and when; or why the push failed. All null on a
+   * run whose repository publishes nowhere. Written after the run's last
+   * word, so it reaches a list read a moment later, not the stream.
+   */
+  publishedRef?: string | null;
+  publishedCommit?: string | null;
+  publishedAt?: number | null;
+  publishError?: string | null;
   [key: string]: unknown;
 }
 
@@ -233,7 +245,16 @@ export interface GateUsage {
     resetsAt: string | null;
     label?: string;
   }>;
-  accounts: { total: number; enabled: number; available: number; coolingDown: number; quotaBlocked: number };
+  accounts: {
+    total: number;
+    enabled: number;
+    available: number;
+    coolingDown: number;
+    /** Held back by the floor on an account-wide window. */
+    quotaBlocked: number;
+    /** Out of one model's weekly window while still serving every other model (gate 0.40.1+). */
+    modelBlocked?: number;
+  };
   plan: string | null;
   updatedAt: number | null;
   floorPercent: number;
