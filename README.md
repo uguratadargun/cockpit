@@ -15,6 +15,13 @@ node it is on. Answering in the window continues the run in its terminal.
 - **Terminals are real Claude Code.** Each session is a `claude` process in a
   pty (node-pty), drawn with xterm.js. Nothing is emulated and nothing is
   typed into a terminal on your behalf.
+- **Terminals start in auto mode.** A run typed in here walks a pipeline of
+  nodes that read the project, write to its worktree and run its own commands;
+  in Claude Code's default mode each of those stops for an approval, which is
+  the waiting this window exists to end. Every terminal the cockpit starts —
+  on this machine or on the gate server — begins with `--permission-mode auto`,
+  which decides the ordinary actions and still sends what it will not decide to
+  **Approvals**. Shift+Tab in the terminal changes the mode for that session.
 - **Questions come out through hooks.** Every terminal the cockpit starts is
   given a settings file whose hooks talk to the app over a unix socket. A
   `PreToolUse` hook on `AskUserQuestion` holds the question until you answer

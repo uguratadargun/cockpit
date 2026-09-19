@@ -286,7 +286,14 @@ function spawnClaude(cwd: string, extraArgv: string[], sessionId: string | null)
     ptys.spawn({
       ptyId,
       cwd: dir,
-      argv: [claude.path, "--settings", settings, ...extraArgv],
+      // Every terminal the cockpit starts begins in auto mode. A run typed in
+      // here walks a pipeline of nodes that read, write and run this project's
+      // own commands; in the default mode each of those stops on a prompt the
+      // person has to answer, which is the thing this window exists to take
+      // off them. `auto` decides without asking and still routes what it will
+      // not decide to Approvals, so nothing is lost — only the waiting.
+      // Shift+Tab in the terminal changes the mode back for that session.
+      argv: [claude.path, "--settings", settings, "--permission-mode", "auto", ...extraArgv],
       env: claudeEnv(ptyId),
       sessionId,
       owner: win.webContents,
