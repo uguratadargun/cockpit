@@ -5,10 +5,13 @@ they ask, the approvals they wait for, and the workflow each one is walking.
 
 A person running four or five `/gate:run`s has four or five terminals and no
 way to tell which one is waiting on them. The cockpit puts the terminals in one
-window and takes the questions out of them: a run's `clarify` node lands in
-**Questions**, its `plan-review` and `acceptance` nodes and every permission
-prompt in **Approvals**, and each run's graph in **Executions**, lit at the
-node it is on. Answering in the window continues the run in its terminal.
+window and takes the questions out of them: a node that asks a question lands
+in **Questions** (`clarify` on the shipped roads), a node that asks for an
+approval in **Approvals** (`plan-review`, `acceptance`) along with every
+permission prompt, and each run's graph in **Executions**, lit at the node it
+is on. Answering in the window continues the run in its terminal. A road with
+nobody in the loop — gate's `dev-auto` — reaches neither panel and is followed
+in **Executions** alone.
 
 ## How it works
 
@@ -32,12 +35,18 @@ node it is on. Answering in the window continues the run in its terminal.
 - **The run says which is which.** gate writes what every session was last
   told to do to `~/.gate/sessions/<session>.json`, including whether the node
   is a `question` or an `approval`; the cockpit reads it to sort the two
-  panels and to name the run and node on each session.
+  panels and to name the run and node on each session. A node that is neither
+  reaches no panel: on an autonomous road every node is one, because the
+  planner's questions are ruled on by the run's own `decide` agent instead of
+  being put to you, and the window's whole account of such a run is its
+  session line and its graph.
 - **Idle terminals go to sleep.** A `claude` at its prompt holds a few
   hundred megabytes, and six of them add up. A terminal idle for ten
   minutes — nothing typed or printed, no question out, no run in its hands —
   is ended; its transcript is the session, so clicking it resumes it where it
-  was. `COCKPIT_HIBERNATE_MIN` changes the wait; `0` turns it off.
+  was. A run still walking holds its terminal awake however quiet it goes,
+  which is what lets an autonomous road finish in a window nobody is watching.
+  `COCKPIT_HIBERNATE_MIN` changes the wait; `0` turns it off.
 - **Runs are yours.** The app authenticates with your own `gatec_…` token,
   the one the Team page hands out, and gate's client API shows it the runs you
   started and nothing else — a snapshot of the unfinished ones, then every
